@@ -415,11 +415,33 @@ app.post('/api/log-dose', async (req, res) => {
                 const dosage = scheduleRows[0].dosage_amount;
                 const medId = scheduleRows[0].user_med_id;
                 
-                // 🛑 แก้ตรงนี้: ใช้ GREATEST(..., 0) เพื่อไม่ให้ค่าต่ำกว่า 0
+                // 1. ตัดสต็อก (ป้องกันติดลบ) -> อันนี้มีแล้ว ดีครับ
                 await connection.query(
                     'UPDATE Stock SET current_quantity = GREATEST(current_quantity - ?, 0) WHERE user_med_id = ?',
                     [dosage, medId]
                 );
+
+                // ✅ 2. (เพิ่มส่วนนี้) เช็คว่าต้องเตือนไหม?
+                const [stockRows] = await connection.query(
+                    'SELECT current_quantity, notify_threshold FROM Stock WHERE user_med_id = ?',
+                    [medId]
+                );
+
+                let alertMessage = null;
+                if (stockRows.length > 0) {
+                    const { current_quantity, notify_threshold } = stockRows[0];
+                    // ถ้าเหลือน้อยกว่าหรือเท่ากับเกณฑ์ และยังไม่หมด (ถ้าหมดจะเตือนอีกแบบหรือปิดปุ่ม)
+                    if (current_quantity <= notify_threshold && current_quantity > 0) {
+                        alertMessage = `⚠️ ยาใกล้หมด! เหลือเพียง ${current_quantity} หน่วย`;
+                    } else if (current_quantity === 0) {
+                        alertMessage = `❌ ยาหมดแล้ว! กรุณาเติมยา`;
+                    }
+                }
+
+                await connection.commit();
+                // ส่ง alert กลับไป
+                res.json({ message: 'บันทึกเรียบร้อย', alert: alertMessage }); 
+                return;
             }
         }
         await connection.commit();

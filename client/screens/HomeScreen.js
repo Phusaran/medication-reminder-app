@@ -88,7 +88,7 @@ export default function HomeScreen({ route, navigation }) {
         </View>
       </View>
       <View style={styles.statusContainer}>
-         <TouchableOpacity style={[styles.statusBtn, {backgroundColor: '#e3f2fd'}]} onPress={() => handleTakePill(item)}>
+         <TouchableOpacity style={[styles.statusBtn, {backgroundColor: '#e3f2fd'}]} onPress={() => handleTakePill(item)}disabled={isOutOfStock}>
              <Text style={{fontSize: 18}}>✔️</Text>
          </TouchableOpacity>
       </View>
