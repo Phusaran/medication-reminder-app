@@ -259,13 +259,13 @@ npx expo start
 
 * Email: `test@gmail.com`
 
-> Password:
+> Password: 123456
 
 ### Caregiver
 
 * Email: `mom@email.com`
 
-> Password:
+> Password: 123456
 
 ## 📌 Notes
 
