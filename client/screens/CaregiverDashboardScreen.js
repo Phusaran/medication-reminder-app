@@ -54,18 +54,12 @@ export default function CaregiverDashboardScreen({ route, navigation }) {
         {/* เมนูลัด */}
         <Text style={styles.sectionTitle}>จัดการข้อมูล</Text>
         <View style={styles.actionGrid}>
-            <TouchableOpacity style={styles.actionButton} onPress={() => navigateAsPatient('Stock')}>
-                <View style={[styles.iconCircle, {backgroundColor: '#e3f2fd'}]}>
-                    <Ionicons name="medkit" size={24} color="#0056b3" />
-                </View>
-                <Text style={styles.actionText}>คลังยา</Text>
-            </TouchableOpacity>
-
+            
             <TouchableOpacity style={styles.actionButton} onPress={() => navigateAsPatient('Home')}>
                 <View style={[styles.iconCircle, {backgroundColor: '#ffebee'}]}>
                     <Ionicons name="list" size={24} color="#d32f2f" />
                 </View>
-                <Text style={styles.actionText}>ตารางยา</Text>
+                <Text style={styles.actionText}>จัดการข้อมูล</Text>
             </TouchableOpacity>
         </View>
         
