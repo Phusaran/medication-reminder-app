@@ -2,9 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
-
-// ⚠️ เช็ค IP ให้ตรง (192.168.0.31)
-const API_URL = 'http://192.168.0.31:3000/api/register';
+// ✅ Import Config
+import { API_URL } from '../constants/config';
 
 export default function RegisterScreen({ navigation }) {
   const [firstname, setFirstname] = useState('');
@@ -19,7 +18,8 @@ export default function RegisterScreen({ navigation }) {
     }
 
     try {
-      await axios.post(API_URL, {
+      // ✅ แก้ Path: /register
+      await axios.post(`${API_URL}/register`, {
         firstname,
         lastname,
         email,
@@ -34,12 +34,9 @@ export default function RegisterScreen({ navigation }) {
       Alert.alert("ผิดพลาด", "ไม่สามารถสมัครสมาชิกได้ (อีเมลอาจซ้ำ)");
     }
   };
-
+  // ... (ส่วน UI เหมือนเดิม)
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={styles.container}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
             <Text style={styles.title}>สร้างบัญชีใหม่</Text>
@@ -48,39 +45,13 @@ export default function RegisterScreen({ navigation }) {
 
         <View style={styles.form}>
             <Text style={styles.label}>ชื่อจริง</Text>
-            <TextInput 
-                style={styles.input} 
-                placeholder="สมชาย" 
-                value={firstname}
-                onChangeText={setFirstname}
-            />
-
+            <TextInput style={styles.input} placeholder="สมชาย" value={firstname} onChangeText={setFirstname} />
             <Text style={styles.label}>นามสกุล</Text>
-            <TextInput 
-                style={styles.input} 
-                placeholder="ใจดี" 
-                value={lastname}
-                onChangeText={setLastname}
-            />
-
+            <TextInput style={styles.input} placeholder="ใจดี" value={lastname} onChangeText={setLastname} />
             <Text style={styles.label}>อีเมล</Text>
-            <TextInput 
-                style={styles.input} 
-                placeholder="email@example.com" 
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={email}
-                onChangeText={setEmail}
-            />
-
+            <TextInput style={styles.input} placeholder="email@example.com" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail} />
             <Text style={styles.label}>รหัสผ่าน</Text>
-            <TextInput 
-                style={styles.input} 
-                placeholder="******" 
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-            />
+            <TextInput style={styles.input} placeholder="******" secureTextEntry value={password} onChangeText={setPassword} />
 
             <TouchableOpacity style={styles.button} onPress={handleRegister}>
                 <Text style={styles.buttonText}>สมัครสมาชิก</Text>
@@ -103,27 +74,8 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: '#666' },
   form: { width: '100%' },
   label: { fontSize: 16, marginBottom: 8, color: '#333', fontWeight: '500' },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 15,
-    fontSize: 16,
-    marginBottom: 20,
-    backgroundColor: '#fafafa'
-  },
-  button: {
-    backgroundColor: '#0056b3',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 5,
-  },
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 15, fontSize: 16, marginBottom: 20, backgroundColor: '#fafafa' },
+  button: { backgroundColor: '#0056b3', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10, elevation: 5 },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   linkContainer: { marginTop: 20, alignItems: 'center' },
   linkText: { color: '#0056b3', fontSize: 16 }

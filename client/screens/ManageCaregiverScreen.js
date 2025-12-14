@@ -3,9 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert } from 'react
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
-
-// ⚠️ เช็ค IP
-const API_URL = 'http://192.168.0.31:3000/api/caregivers';
+// ✅ Import Config
+import { API_URL } from '../constants/config';
 
 export default function ManageCaregiverScreen({ route, navigation }) {
   const { user } = route.params;
@@ -17,33 +16,29 @@ export default function ManageCaregiverScreen({ route, navigation }) {
 
   const fetchCaregivers = async () => {
     try {
-      const response = await axios.get(`${API_URL}/${user.id}`);
+      // ✅ แก้ Path: /caregivers/${user.id}
+      const response = await axios.get(`${API_URL}/caregivers/${user.id}`);
       setCaregivers(response.data);
-    } catch (error) {
-      console.log(error);
-    }
+    } catch (error) { console.log(error); }
   };
 
   const handleDelete = (id) => {
     Alert.alert('ยืนยัน', 'ต้องการลบผู้ดูแลคนนี้?', [
       { text: 'ยกเลิก' },
       { text: 'ลบ', style: 'destructive', onPress: async () => {
-          await axios.delete(`${API_URL}/${id}`);
+          // ✅ แก้ Path: /caregivers/${id}
+          await axios.delete(`${API_URL}/caregivers/${id}`);
           fetchCaregivers();
       }}
     ]);
   };
 
-  // ฟังก์ชันแปลงวันที่ให้สวยงาม
   const formatDate = (dateString) => {
     if (!dateString) return "";
     const date = new Date(dateString);
     return date.toLocaleDateString('th-TH', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
     });
   };
 
@@ -77,10 +72,7 @@ export default function ManageCaregiverScreen({ route, navigation }) {
                         <View>
                             <Text style={styles.name}>{item.firstname} {item.lastname}</Text>
                             <Text style={styles.email}>{item.email}</Text>
-                            {/* ✅ เพิ่มวันที่ตรงนี้ */}
-                            <Text style={styles.dateText}>
-                                เพิ่มเมื่อ: {formatDate(item.granted_date)}
-                            </Text>
+                            <Text style={styles.dateText}>เพิ่มเมื่อ: {formatDate(item.granted_date)}</Text>
                         </View>
                     </View>
                     <TouchableOpacity onPress={() => handleDelete(item.caring_id)}>
@@ -97,27 +89,17 @@ export default function ManageCaregiverScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9f9f9' },
-  header: {
-    backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between',
-    padding: 20, paddingTop: 50, alignItems: 'center', elevation: 2
-  },
+  header: { backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', padding: 20, paddingTop: 50, alignItems: 'center', elevation: 2 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   content: { flex: 1, padding: 20 },
-  qrContainer: {
-      backgroundColor: '#fff', padding: 30, borderRadius: 20,
-      alignItems: 'center', marginBottom: 30,
-      elevation: 4, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10
-  },
+  qrContainer: { backgroundColor: '#fff', padding: 30, borderRadius: 20, alignItems: 'center', marginBottom: 30, elevation: 4 },
   qrTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 20, color: '#0056b3' },
   qrWrapper: { padding: 10, backgroundColor: '#fff' },
   qrRef: { marginTop: 15, color: '#888', fontSize: 14 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: '#666' },
-  card: {
-      backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between',
-      alignItems: 'center', padding: 15, borderRadius: 10, marginBottom: 10, elevation: 2
-  },
+  card: { backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderRadius: 10, marginBottom: 10, elevation: 2 },
   name: { fontWeight: 'bold', color: '#333' },
   email: { color: '#666', fontSize: 12 },
-  dateText: { color: '#0056b3', fontSize: 11, marginTop: 2 }, // สไตล์ของวันที่
+  dateText: { color: '#0056b3', fontSize: 11, marginTop: 2 },
   emptyText: { textAlign: 'center', color: '#999', marginTop: 10 }
 });

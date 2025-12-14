@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert } from 'react-native';
 import axios from 'axios';
-import { Ionicons } from '@expo/vector-icons';
-
-// ⚠️ เช็ค IP
-const API_URL = 'http://192.168.0.31:3000/api/admin/medications';
+// ✅ Import Config
+import { API_URL } from '../constants/config';
 
 export default function AdminMedicationMasterScreen({ navigation }) {
   const [meds, setMeds] = useState([]);
@@ -16,7 +14,8 @@ export default function AdminMedicationMasterScreen({ navigation }) {
 
   const fetchMeds = async () => {
     try {
-      const response = await axios.get(API_URL);
+      // ✅ ดึงรายชื่อยาจาก Master
+      const response = await axios.get(`${API_URL}/master-medications`);
       setMeds(response.data);
     } catch (error) { console.log(error); }
   };
@@ -24,7 +23,8 @@ export default function AdminMedicationMasterScreen({ navigation }) {
   const handleAdd = async () => {
     if (!name) return Alert.alert('แจ้งเตือน', 'กรุณาระบุชื่อยา');
     try {
-      await axios.post(API_URL, {
+      // ✅ เพิ่มยาเข้า Master
+      await axios.post(`${API_URL}/admin/medications`, {
         generic_name: name,
         description: desc,
         dosage_unit: unit
@@ -37,15 +37,14 @@ export default function AdminMedicationMasterScreen({ navigation }) {
   return (
     <View style={styles.container}>
         <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color="#333"/></TouchableOpacity>
-            <Text style={styles.title}>คลังยาหลัก</Text>
-            <View style={{width: 24}}/>
+            <Text style={styles.title}>คลังยาหลัก (Master)</Text>
         </View>
 
         <View style={styles.form}>
-            <TextInput style={styles.input} placeholder="ชื่อยา (เช่น Aspirin)" value={name} onChangeText={setName} />
-            <TextInput style={styles.input} placeholder="สรรพคุณ (เช่น แก้ปวด)" value={desc} onChangeText={setDesc} />
-            <TextInput style={styles.input} placeholder="หน่วย (เช่น เม็ด)" value={unit} onChangeText={setUnit} />
+            <Text style={{fontWeight: 'bold', marginBottom: 10}}>เพิ่มยาใหม่</Text>
+            <TextInput style={styles.input} placeholder="ชื่อสามัญทางยา" value={name} onChangeText={setName} />
+            <TextInput style={styles.input} placeholder="คำอธิบาย / สรรพคุณ" value={desc} onChangeText={setDesc} />
+            <TextInput style={styles.input} placeholder="หน่วยนับ (เช่น เม็ด)" value={unit} onChangeText={setUnit} />
             <TouchableOpacity style={styles.btn} onPress={handleAdd}>
                 <Text style={styles.btnText}>+ เพิ่มยาเข้าสู่ระบบ</Text>
             </TouchableOpacity>
@@ -74,7 +73,7 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 10, marginBottom: 10 },
   btn: { backgroundColor: '#2e7d32', padding: 12, borderRadius: 8, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: 'bold' },
-  card: { backgroundColor: '#fff', padding: 15, borderRadius: 10, marginBottom: 10, elevation: 1 },
-  name: { fontWeight: 'bold', fontSize: 16 },
+  card: { backgroundColor: '#fff', padding: 15, borderRadius: 8, marginBottom: 10 },
+  name: { fontSize: 16, fontWeight: 'bold' },
   detail: { color: '#666' }
 });

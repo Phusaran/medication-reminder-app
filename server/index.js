@@ -144,18 +144,32 @@ app.put('/api/users/:id', async (req, res) => {
 // ดึงรายการยาของ User
 app.get('/api/medications/:userId', async (req, res) => {
     const { userId } = req.params;
+    const { all } = req.query; 
+
     try {
-        const [rows] = await db.query(`
+        let sql = `
             SELECT 
                 m.user_med_id, m.custom_name, m.instruction, m.dosage_unit, m.disease_group,
-                m.custom_image AS image_url, 
+                m.custom_image AS image_url, m.is_active, 
                 s.current_quantity,
-                sch.schedule_id, sch.time_to_take, sch.days_of_week, sch.dosage_amount
+                sch.schedule_id, sch.time_to_take, sch.days_of_week, sch.dosage_amount,
+                MAX(CASE WHEN ml.med_log_id IS NOT NULL THEN 1 ELSE 0 END) AS is_taken
             FROM User_Medication m
             JOIN Stock s ON m.user_med_id = s.user_med_id
             LEFT JOIN Schedule sch ON m.user_med_id = sch.user_med_id
+            LEFT JOIN Medication_Log ml ON sch.schedule_id = ml.schedule_id AND DATE(ml.taken_at) = CURDATE()
             WHERE m.user_id = ?
-        `, [userId]);
+            
+            AND (m.is_deleted = 0 OR m.is_deleted IS NULL)  -- ✅ เพิ่มบรรทัดนี้: กรองยาที่ถูกลบออก
+        `;
+
+        if (all !== 'true') {
+            sql += ` AND (m.is_active = 1 OR m.is_active IS NULL)`;
+        }
+
+        sql += ` GROUP BY m.user_med_id, sch.schedule_id`;
+
+        const [rows] = await db.query(sql, [userId]);
         res.json(rows);
     } catch (error) {
         console.error(error);
@@ -206,7 +220,7 @@ app.post('/api/medications', async (req, res) => {
         initial_quantity, notify_threshold, days_of_week, dosage_amount,
         intake_timing, start_date, end_date, times,
         disease_group, 
-        drug_type // 👈 รับค่านี้เพิ่ม
+        drug_type 
     } = req.body;
 
     const connection = await db.getConnection();
@@ -215,9 +229,9 @@ app.post('/api/medications', async (req, res) => {
 
         const [medResult] = await connection.query(
             `INSERT INTO User_Medication 
-            (user_id, custom_name, disease_group, drug_type, instruction, dosage_unit, custom_image, intake_timing, start_date, end_date) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // เพิ่ม ? อีก 1 ตัว
-            [user_id, custom_name, disease_group, drug_type, instruction, dosage_unit, image_url, intake_timing, start_date, end_date]
+            (user_id, custom_name, disease_group, drug_type, instruction, dosage_unit, dosage_amount, custom_image, intake_timing, start_date, end_date) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+            [user_id, custom_name, disease_group, drug_type, instruction, dosage_unit, dosage_amount, image_url, intake_timing, start_date, end_date]
         );
         const medId = medResult.insertId;
 
@@ -248,20 +262,22 @@ app.post('/api/medications', async (req, res) => {
     }
 });
 
-// ดึงตารางเวลาของยา 1 ตัว (สำหรับหน้าแก้ไข)
+// ==========================================
+// แก้ไขยา (PUT) - แบบฉลาด (ไม่ลบ Log ถ้าเวลาไม่เปลี่ยน)
+// ==========================================
 app.put('/api/medications/:medId', async (req, res) => {
     const { medId } = req.params;
     const { 
         custom_name, instruction, dosage_unit, image_url, 
         initial_quantity, notify_threshold, intake_timing, start_date, end_date, times,
-        disease_group,
-        drug_type // 👈 รับค่านี้เพิ่ม
+        disease_group, drug_type 
     } = req.body;
 
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();
 
+        // 1. อัปเดตข้อมูลยาหลัก
         let updateQuery = `
             UPDATE User_Medication 
             SET custom_name=?, disease_group=?, drug_type=?, instruction=?, dosage_unit=?, intake_timing=?, start_date=?, end_date=?
@@ -277,19 +293,50 @@ app.put('/api/medications/:medId', async (req, res) => {
 
         await connection.query(updateQuery, params);
 
-        // ... (ส่วน update Stock และ Schedule เหมือนเดิม) ...
+        // 2. อัปเดตสต็อก (กรณีเติมยา)
         await connection.query(
             `UPDATE Stock SET current_quantity=?, notify_threshold=? WHERE user_med_id=?`,
             [initial_quantity, notify_threshold, medId]
         );
 
+        // 3. จัดการตารางเวลา (Schedule) - จุดสำคัญ!
         if (Array.isArray(times) && times.length > 0) {
-            await connection.query('DELETE FROM Schedule WHERE user_med_id = ?', [medId]);
-            for (const timeStr of times) {
-                await connection.query(
-                    `INSERT INTO Schedule (user_med_id, time_to_take, days_of_week, dosage_amount) VALUES (?, ?, ?, ?)`,
-                    [medId, timeStr, 'Everyday', 1]
-                );
+            
+            // 3.1 ดึงเวลาเดิมจาก DB มาเปรียบเทียบก่อน
+            const [existingRows] = await connection.query(
+                'SELECT time_to_take FROM Schedule WHERE user_med_id = ? ORDER BY time_to_take ASC', 
+                [medId]
+            );
+            
+            // แปลงเวลาให้เป็น Format เดียวกันเพื่อเทียบ (เอาแค่ HH:MM)
+            const currentTimes = existingRows.map(r => r.time_to_take.substring(0, 5));
+            const newTimes = times.map(t => t.substring(0, 5)).sort();
+
+            // เช็คว่าเวลาเปลี่ยนหรือไม่?
+            const isTimeChanged = JSON.stringify(currentTimes) !== JSON.stringify(newTimes);
+
+            if (isTimeChanged) {
+                // ⚠️ กรณี: มีการเปลี่ยนเวลากินยา (จำเป็นต้องลบ Log เก่าเพื่อป้องกัน Error)
+                console.log('Time changed: Recreating schedule (Logs will be cleared)');
+                
+                await connection.query(`
+                    DELETE ml FROM Medication_Log ml
+                    JOIN Schedule s ON ml.schedule_id = s.schedule_id
+                    WHERE s.user_med_id = ?
+                `, [medId]);
+
+                await connection.query('DELETE FROM Schedule WHERE user_med_id = ?', [medId]);
+
+                for (const timeStr of times) {
+                    await connection.query(
+                        `INSERT INTO Schedule (user_med_id, time_to_take, days_of_week, dosage_amount) VALUES (?, ?, ?, ?)`,
+                        [medId, timeStr, 'Everyday', 1]
+                    );
+                }
+            } else {
+                // ✅ กรณี: เวลาเหมือนเดิม (เช่น แค่เติมยา, แก้ชื่อ)
+                // ไม่ต้องทำอะไรกับ Schedule -> ประวัติการกินยา (Log) จะยังอยู่ครบ!
+                console.log('Time unchanged: Skipping schedule update to preserve logs');
             }
         }
 
@@ -298,100 +345,35 @@ app.put('/api/medications/:medId', async (req, res) => {
 
     } catch (error) {
         await connection.rollback();
-        console.error(error);
-        res.status(500).json({ message: 'Error updating medication' });
+        console.error("Update Error:", error);
+        res.status(500).json({ message: 'Error updating medication', error: error.message });
     } finally {
         connection.release();
     }
 });
-
-// แก้ไขยา (PUT)
-app.put('/api/medications/:medId', async (req, res) => {
-    const { medId } = req.params;
-    const { 
-        custom_name, instruction, dosage_unit, image_url, 
-        initial_quantity, notify_threshold, intake_timing, start_date, end_date, times,
-        disease_group 
-    } = req.body;
-
-    const connection = await db.getConnection();
-    try {
-        await connection.beginTransaction();
-
-        let updateQuery = `
-            UPDATE User_Medication 
-            SET custom_name=?, disease_group=?, instruction=?, dosage_unit=?, intake_timing=?, start_date=?, end_date=?
-        `;
-        const params = [custom_name, disease_group, instruction, dosage_unit, intake_timing, start_date, end_date];
-
-        if (image_url) {
-            updateQuery += `, custom_image=?`;
-            params.push(image_url);
-        }
-        updateQuery += ` WHERE user_med_id=?`;
-        params.push(medId);
-
-        await connection.query(updateQuery, params);
-
-        await connection.query(
-            `UPDATE Stock SET current_quantity=?, notify_threshold=? WHERE user_med_id=?`,
-            [initial_quantity, notify_threshold, medId]
-        );
-
-        if (Array.isArray(times) && times.length > 0) {
-            await connection.query('DELETE FROM Schedule WHERE user_med_id = ?', [medId]);
-            for (const timeStr of times) {
-                await connection.query(
-                    `INSERT INTO Schedule (user_med_id, time_to_take, days_of_week, dosage_amount) VALUES (?, ?, ?, ?)`,
-                    [medId, timeStr, 'Everyday', 1]
-                );
-            }
-        }
-
-        await connection.commit();
-        res.json({ message: 'แก้ไขข้อมูลเรียบร้อย' });
-
-    } catch (error) {
-        await connection.rollback();
-        console.error(error);
-        res.status(500).json({ message: 'Error updating medication' });
-    } finally {
-        connection.release();
-    }
-});
-
-// ลบยา (DELETE)
+// ลบยา (Soft Delete - ซ่อนยาแต่เก็บประวัติไว้)
 app.delete('/api/medications/:medId', async (req, res) => {
     const { medId } = req.params;
-    const connection = await db.getConnection();
     try {
-        await connection.beginTransaction();
+        // ✅ เปลี่ยนจาก DELETE เป็น UPDATE is_deleted = 1
+        await db.query(
+            'UPDATE User_Medication SET is_deleted = 1 WHERE user_med_id = ?', 
+            [medId]
+        );
         
-        // ลบข้อมูลที่เกี่ยวข้องทั้งหมดก่อน
-        await connection.query(`
-            DELETE ml FROM Medication_Log ml
-            JOIN Schedule s ON ml.schedule_id = s.schedule_id
-            WHERE s.user_med_id = ?
-        `, [medId]);
+        // (ตัวเลือกเสริม) ถ้าอยากปิดการใช้งานยาด้วย เพื่อความชัวร์
+        // await db.query('UPDATE User_Medication SET is_active = 0 WHERE user_med_id = ?', [medId]);
 
-        await connection.query('DELETE FROM Schedule WHERE user_med_id = ?', [medId]);
-        await connection.query('DELETE FROM Stock WHERE user_med_id = ?', [medId]);
-        await connection.query('DELETE FROM User_Medication WHERE user_med_id = ?', [medId]);
-
-        await connection.commit();
-        res.json({ message: 'ลบข้อมูลเรียบร้อย' });
+        res.json({ message: 'ลบข้อมูลเรียบร้อย (เก็บประวัติไว้)' });
 
     } catch (error) {
-        await connection.rollback();
         console.error("Delete Error:", error);
         res.status(500).json({ message: 'Error deleting medication', error: error.message });
-    } finally {
-        connection.release();
     }
 });
 
 // ==========================================
-// 3. ส่วนการกินยา (Log Dose)
+// 3. ส่วนการกินยา (Log Dose) - ป้องกันการบันทึกซ้ำ
 // ==========================================
 
 app.post('/api/log-dose', async (req, res) => {
@@ -400,6 +382,19 @@ app.post('/api/log-dose', async (req, res) => {
     try {
         await connection.beginTransaction();
         
+        // 🔒 1. เช็คก่อนว่าวันนี้บันทึกไปหรือยัง?
+        const [existingLogs] = await connection.query(
+            'SELECT * FROM Medication_Log WHERE schedule_id = ? AND DATE(taken_at) = CURDATE()',
+            [schedule_id]
+        );
+
+        // ถ้ามีประวัติแล้ว ให้หยุดทำงานและแจ้งกลับเลย (ไม่ตัดสต็อกซ้ำ)
+        if (existingLogs.length > 0) {
+            await connection.rollback();
+            return res.status(200).json({ message: 'วันนี้คุณบันทึกยานี้ไปแล้ว' });
+        }
+
+        // 2. ถ้ายังไม่มี ค่อยบันทึก
         await connection.query(
             `INSERT INTO Medication_Log (schedule_id, status, taken_at) VALUES (?, ?, NOW())`,
             [schedule_id, status]
@@ -415,13 +410,13 @@ app.post('/api/log-dose', async (req, res) => {
                 const dosage = scheduleRows[0].dosage_amount;
                 const medId = scheduleRows[0].user_med_id;
                 
-                // 1. ตัดสต็อก (ป้องกันติดลบ) -> อันนี้มีแล้ว ดีครับ
+                // 3. ตัดสต็อก
                 await connection.query(
                     'UPDATE Stock SET current_quantity = GREATEST(current_quantity - ?, 0) WHERE user_med_id = ?',
                     [dosage, medId]
                 );
 
-                // ✅ 2. (เพิ่มส่วนนี้) เช็คว่าต้องเตือนไหม?
+                // 4. เช็คแจ้งเตือนยาหมด
                 const [stockRows] = await connection.query(
                     'SELECT current_quantity, notify_threshold FROM Stock WHERE user_med_id = ?',
                     [medId]
@@ -430,7 +425,6 @@ app.post('/api/log-dose', async (req, res) => {
                 let alertMessage = null;
                 if (stockRows.length > 0) {
                     const { current_quantity, notify_threshold } = stockRows[0];
-                    // ถ้าเหลือน้อยกว่าหรือเท่ากับเกณฑ์ และยังไม่หมด (ถ้าหมดจะเตือนอีกแบบหรือปิดปุ่ม)
                     if (current_quantity <= notify_threshold && current_quantity > 0) {
                         alertMessage = `⚠️ ยาใกล้หมด! เหลือเพียง ${current_quantity} หน่วย`;
                     } else if (current_quantity === 0) {
@@ -439,7 +433,6 @@ app.post('/api/log-dose', async (req, res) => {
                 }
 
                 await connection.commit();
-                // ส่ง alert กลับไป
                 res.json({ message: 'บันทึกเรียบร้อย', alert: alertMessage }); 
                 return;
             }

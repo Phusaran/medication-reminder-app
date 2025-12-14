@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Image } from 'react-native';
 import axios from 'axios';
-
-// ⚠️ เช็ค IP
-const BASE_URL = 'http://192.168.0.31:3000/api';
+// ✅ Import Config
+import { API_URL } from '../constants/config';
 
 export default function LoginScreen({ navigation }) {
-  const [role, setRole] = useState('user'); // 'user', 'caregiver', 'admin'
-  const [email, setEmail] = useState(''); // ใช้เป็น Username สำหรับ Admin
+  const [role, setRole] = useState('user');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const handleLogin = async () => {
@@ -18,22 +17,21 @@ export default function LoginScreen({ navigation }) {
         endpoint = '/caregiver/login';
     } else if (role === 'admin') {
         endpoint = '/admin/login';
-        payload = { username: email, password }; // Admin ใช้ username
+        payload = { username: email, password }; 
     }
     
     try {
-      const response = await axios.post(`${BASE_URL}${endpoint}`, payload);
+      // ✅ ใช้ API_URL
+      const response = await axios.post(`${API_URL}${endpoint}`, payload);
       
       if (response.status === 200) {
         const userData = response.data;
-        
         if (role === 'user') {
             const userForApp = { ...userData, id: userData.user_id };
             navigation.replace('Home', { user: userForApp });
         } else if (role === 'caregiver') {
             navigation.replace('CaregiverHome', { caregiver: userData });
         } else {
-            // ไปหน้า Admin
             navigation.replace('AdminHome', { admin: userData });
         }
       }
@@ -43,6 +41,7 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // ... (ส่วน render และ styles เหมือนเดิม ไม่ต้องแก้)
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -51,7 +50,6 @@ export default function LoginScreen({ navigation }) {
       </View>
 
       <View style={styles.formContainer}>
-        {/* Toggle 3 ปุ่ม */}
         <View style={styles.toggleContainer}>
             {['user', 'caregiver', 'admin'].map((r) => (
                 <TouchableOpacity 
@@ -66,25 +64,11 @@ export default function LoginScreen({ navigation }) {
             ))}
         </View>
 
-        <Text style={styles.label}>
-            {role === 'admin' ? 'ชื่อผู้ใช้ (Username)' : 'อีเมล'}
-        </Text>
-        <TextInput 
-            style={styles.input} 
-            placeholder={role === 'admin' ? "admin" : "ระบุอีเมล"} 
-            value={email} 
-            onChangeText={setEmail} 
-            autoCapitalize="none" 
-        />
+        <Text style={styles.label}>{role === 'admin' ? 'ชื่อผู้ใช้ (Username)' : 'อีเมล'}</Text>
+        <TextInput style={styles.input} placeholder={role === 'admin' ? "admin" : "ระบุอีเมล"} value={email} onChangeText={setEmail} autoCapitalize="none" />
 
         <Text style={styles.label}>รหัสผ่าน</Text>
-        <TextInput 
-            style={styles.input} 
-            placeholder="ระบุรหัสผ่าน" 
-            value={password} 
-            onChangeText={setPassword} 
-            secureTextEntry 
-        />
+        <TextInput style={styles.input} placeholder="ระบุรหัสผ่าน" value={password} onChangeText={setPassword} secureTextEntry />
 
         <TouchableOpacity style={styles.button} onPress={handleLogin}>
           <Text style={styles.buttonText}>เข้าสู่ระบบ</Text>
@@ -108,13 +92,11 @@ const styles = StyleSheet.create({
   logo: { width: 80, height: 80, tintColor: 'white', marginBottom: 10 },
   headerText: { color: '#fff', fontSize: 32, fontWeight: 'bold' },
   formContainer: { padding: 30, marginTop: 10 },
-  
   toggleContainer: { flexDirection: 'row', backgroundColor: '#f0f0f0', borderRadius: 25, padding: 4, marginBottom: 20 },
   toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 20 },
   activeBtn: { backgroundColor: '#fff', elevation: 2 },
   toggleText: { fontSize: 14, color: '#888', fontWeight: 'bold' },
   activeText: { color: '#0056b3' },
-
   label: { fontSize: 16, color: '#333', marginBottom: 8, fontWeight: '600' },
   input: { borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: 10, marginBottom: 20, fontSize: 16 },
   button: { backgroundColor: '#0056b3', padding: 15, borderRadius: 25, alignItems: 'center', marginTop: 10 },

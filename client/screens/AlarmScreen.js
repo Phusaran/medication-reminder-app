@@ -2,31 +2,29 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
-
-// ⚠️ IP เครื่องคุณ
-const API_URL = 'http://192.168.0.31:3000/api/log-dose';
+// ✅ Import Config
+import { API_URL } from '../constants/config';
 
 export default function AlarmScreen({ route, navigation }) {
-  const { medName, scheduleId } = route.params || {}; // รับรหัสยามาด้วย
+  const { medName, scheduleId } = route.params || {}; 
   const [loading, setLoading] = useState(false);
 
   const handleTakePill = async () => {
     if (!scheduleId) {
-        // กรณีไม่มีรหัส (เช่น เป็นยาเก่าที่ตั้งเตือนไว้นานแล้ว) ให้ปิดไปเลย
         navigation.goBack();
         return;
     }
 
     setLoading(true);
     try {
-        // ยิง API บันทึกการกินยา (Log Dose)
-        await axios.post(API_URL, {
+        // ✅ แก้ Path: /log-dose
+        await axios.post(`${API_URL}/log-dose`, {
             schedule_id: scheduleId,
             status: 'taken'
         });
         
         Alert.alert("เรียบร้อย", "บันทึกและตัดสต็อกยาแล้ว!");
-        navigation.goBack(); // กลับหน้าเดิม
+        navigation.goBack(); 
 
     } catch (error) {
         console.log(error);
@@ -49,23 +47,11 @@ export default function AlarmScreen({ route, navigation }) {
       <Text style={styles.medName}>{medName || "ได้เวลาทานยา"}</Text>
 
       <View style={styles.buttonContainer}>
-        {/* ปุ่มกินยาแล้ว (ยิง API) */}
-        <TouchableOpacity 
-            style={styles.takenButton}
-            onPress={handleTakePill}
-            disabled={loading}
-        >
-            {loading ? (
-                <ActivityIndicator color="#0056b3" />
-            ) : (
-                <Text style={styles.takenText}>กินยาแล้ว</Text>
-            )}
+        <TouchableOpacity style={styles.takenButton} onPress={handleTakePill} disabled={loading}>
+            {loading ? (<ActivityIndicator color="#0056b3" />) : (<Text style={styles.takenText}>กินยาแล้ว</Text>)}
         </TouchableOpacity>
 
-        <TouchableOpacity 
-            style={styles.snoozeButton}
-            onPress={() => navigation.goBack()}
-        >
+        <TouchableOpacity style={styles.snoozeButton} onPress={() => navigation.goBack()}>
             <Text style={styles.snoozeText}>ปิด / เลื่อนไปก่อน</Text>
         </TouchableOpacity>
       </View>

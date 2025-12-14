@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Image } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
-
-// ⚠️ เช็ค IP
-const BASE_URL = 'http://192.168.0.31:3000/api';
+// ✅ Import Config
+import { API_URL } from '../constants/config';
 
 export default function MasterSearchScreen({ navigation, route }) {
   const { user } = route.params;
@@ -17,12 +16,12 @@ export default function MasterSearchScreen({ navigation, route }) {
 
   const fetchMasterMeds = async () => {
     try {
-      const response = await axios.get(`${BASE_URL}/master-medications?query=${search}`);
+      // ✅ แก้ Path
+      const response = await axios.get(`${API_URL}/master-medications?query=${search}`);
       setMasterMeds(response.data);
     } catch (error) { console.log(error); }
   };
 
-  // เมื่อเลือกยา -> ส่งข้อมูลไปหน้า AddMedication
   const handleSelect = (item) => {
       navigation.navigate('AddMedication', { 
           user: user,
@@ -47,12 +46,7 @@ export default function MasterSearchScreen({ navigation, route }) {
 
       <View style={styles.searchBox}>
           <Ionicons name="search" size={20} color="#666" style={{marginRight: 10}} />
-          <TextInput 
-              placeholder="ค้นหาชื่อยา หรือ สรรพคุณ..." 
-              style={{flex: 1}}
-              value={search}
-              onChangeText={setSearch}
-          />
+          <TextInput placeholder="ค้นหาชื่อยา หรือ สรรพคุณ..." style={{flex: 1}} value={search} onChangeText={setSearch} />
       </View>
 
       <FlatList 
@@ -65,20 +59,14 @@ export default function MasterSearchScreen({ navigation, route }) {
                   <View style={{flex: 1}}>
                       <Text style={styles.medName}>{item.generic_name}</Text>
                       <Text style={styles.medDesc}>{item.description}</Text>
-                      <View style={styles.badge}>
-                          <Text style={styles.badgeText}>{item.drug_type}</Text>
-                      </View>
+                      <View style={styles.badge}><Text style={styles.badgeText}>{item.drug_type}</Text></View>
                   </View>
                   <Ionicons name="add-circle-outline" size={28} color="#0056b3" />
               </TouchableOpacity>
           )}
       />
       
-      {/* ปุ่มกดข้ามไปเพิ่มเอง */}
-      <TouchableOpacity 
-          style={styles.skipButton}
-          onPress={() => navigation.navigate('AddMedication', { user: user })}
-      >
+      <TouchableOpacity style={styles.skipButton} onPress={() => navigation.navigate('AddMedication', { user: user })}>
           <Text style={styles.skipText}>หาไม่เจอ? เพิ่มยาเองด้วยมือ</Text>
       </TouchableOpacity>
     </View>

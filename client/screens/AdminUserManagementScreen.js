@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
-
-// ⚠️ เช็ค IP
-const API_URL = 'http://192.168.0.31:3000/api/admin/users';
+// ✅ Import Config
+import { API_URL } from '../constants/config';
 
 export default function AdminUserManagementScreen({ navigation }) {
   const [users, setUsers] = useState([]);
@@ -13,7 +12,8 @@ export default function AdminUserManagementScreen({ navigation }) {
 
   const fetchUsers = async () => {
     try {
-      const response = await axios.get(API_URL);
+      // ✅ ดึง User ทั้งหมด
+      const response = await axios.get(`${API_URL}/admin/users`);
       setUsers(response.data);
     } catch (error) { console.log(error); }
   };
@@ -22,7 +22,8 @@ export default function AdminUserManagementScreen({ navigation }) {
     Alert.alert('ยืนยัน', 'ต้องการลบผู้ใช้นี้ออกจากระบบ?', [
       { text: 'ยกเลิก' },
       { text: 'ลบ', style: 'destructive', onPress: async () => {
-          await axios.delete(`${API_URL}/${id}`);
+          // ✅ ลบ User
+          await axios.delete(`${API_URL}/admin/users/${id}`);
           fetchUsers();
       }}
     ]);
@@ -59,7 +60,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, paddingTop: 50, backgroundColor: '#fff', alignItems: 'center' },
   title: { fontSize: 18, fontWeight: 'bold' },
-  card: { backgroundColor: '#fff', padding: 15, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, elevation: 2 },
-  name: { fontWeight: 'bold', fontSize: 16 },
+  card: { backgroundColor: '#fff', padding: 15, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  name: { fontSize: 16, fontWeight: 'bold' },
   email: { color: '#666' }
 });

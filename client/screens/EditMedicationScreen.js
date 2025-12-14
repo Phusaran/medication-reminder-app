@@ -1,28 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Modal, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Modal, Image, ActivityIndicator } from 'react-native'; // ✅ เพิ่ม Modal
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
-
-// ⚠️ เช็ค IP
-const BASE_URL = 'http://192.168.0.31:3000'; 
-const API_URL = `${BASE_URL}/api`;
+import { API_URL } from '../constants/config';
 
 export default function EditMedicationScreen({ route, navigation }) {
-  const { medication } = route.params; // รับข้อมูลยาที่ส่งมา
+  const { medication } = route.params;
 
   const [name, setName] = useState(medication.custom_name);
   const [instruction, setInstruction] = useState(medication.instruction);
   const [quantity, setQuantity] = useState(medication.current_quantity.toString());
   const [unit, setUnit] = useState(medication.dosage_unit);
-  const [image, setImage] = useState(medication.image_url); // ใช้ image_url (AS alias จาก query)
+  const [image, setImage] = useState(medication.image_url);
   const [loading, setLoading] = useState(false);
 
   // Time & Date
   const [intakeTiming, setIntakeTiming] = useState(medication.intake_timing || 'after_meal');
   const [endDate, setEndDate] = useState(medication.end_date ? new Date(medication.end_date) : new Date());
-  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
 
   // Schedule List
   const [timeList, setTimeList] = useState([]);
@@ -36,19 +32,25 @@ export default function EditMedicationScreen({ route, navigation }) {
 
   const fetchSchedules = async () => {
       try {
-          const response = await axios.get(`${API_URL}/medication/${medication.user_med_id}`);
-          const schedules = response.data.map((item, index) => {
-              // แปลงเวลา "08:00:00" เป็น Date Object
-              const [h, m] = item.time_to_take.split(':');
-              const d = new Date();
-              d.setHours(h, m, 0, 0);
-              return { id: Date.now() + index, date: d.getTime() };
-          });
-          setTimeList(schedules);
+          const response = await axios.get(`${API_URL}/medications/${medication.user_med_id}`);
+          const meds = response.data;
+          
+          if (Array.isArray(meds) && meds.length > 0) {
+             const schedules = meds.map((item, index) => {
+                 if (item.time_to_take) {
+                    const [h, m] = item.time_to_take.split(':');
+                    const d = new Date();
+                    d.setHours(h, m, 0, 0);
+                    return { id: Date.now() + index, date: d.getTime() };
+                 }
+                 return null;
+             }).filter(item => item !== null);
+             
+             if (schedules.length > 0) setTimeList(schedules);
+          }
       } catch (error) { console.log(error); }
   };
 
-  // --- Image Picker ---
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return Alert.alert('ขออภัย', 'ต้องการสิทธิ์เข้าถึงรูปภาพ');
@@ -59,24 +61,32 @@ export default function EditMedicationScreen({ route, navigation }) {
     if (!result.canceled) setImage(result.assets[0].uri);
   };
 
-  // --- Time Management ---
   const formatTime = (timestamp) => {
       const d = new Date(timestamp);
       return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   };
 
+  // --- Picker Logic ---
   const openTimePicker = (id, timestamp) => {
       setCurrentEditingId(id);
       setTempDate(new Date(timestamp));
       setShowTimePicker(true);
   };
 
+  // Android: เลือกปุ๊บปิดปั๊บ
+  const onTimeSelectedAndroid = (event, selectedDate) => {
+      setShowTimePicker(false);
+      if (selectedDate) handleTimeConfirm(selectedDate);
+  };
+
+  // iOS: กดตกลงก่อนค่อยปิด
+  const confirmIOSTime = () => {
+      handleTimeConfirm(tempDate);
+      setShowTimePicker(false);
+  };
+
   const handleTimeConfirm = (selectedDate) => {
-      if (Platform.OS === 'android') setShowTimePicker(false);
-      if (selectedDate) {
-          setTimeList(prev => prev.map(item => item.id === currentEditingId ? { ...item, date: selectedDate.getTime() } : item));
-      }
-      if (Platform.OS === 'ios') setShowTimePicker(false);
+      setTimeList(prev => prev.map(item => item.id === currentEditingId ? { ...item, date: selectedDate.getTime() } : item));
   };
 
   const addTimeRow = () => {
@@ -89,12 +99,10 @@ export default function EditMedicationScreen({ route, navigation }) {
       setTimeList(prev => prev.filter(item => item.id !== id));
   };
 
-  // --- Save Update ---
   const handleUpdate = async () => {
       setLoading(true);
       try {
           let finalImageUrl = image;
-          // ถ้าเป็นรูปใหม่ (Local URI) ให้อัปโหลดก่อน
           if (image && image.startsWith('file://')) {
               const formData = new FormData();
               formData.append('profileImage', { uri: image, name: 'med.jpg', type: 'image/jpeg' });
@@ -112,7 +120,7 @@ export default function EditMedicationScreen({ route, navigation }) {
               notify_threshold: 5,
               image_url: finalImageUrl,
               intake_timing: intakeTiming,
-              start_date: new Date().toISOString().split('T')[0], // วันที่เริ่มแก้ยากหน่อย เอาเป็นวันปัจจุบันหรือวันเดิม
+              start_date: new Date().toISOString().split('T')[0],
               end_date: endDate.toISOString().split('T')[0],
               times: timeStrings
           };
@@ -193,7 +201,8 @@ export default function EditMedicationScreen({ route, navigation }) {
             <View key={item.id} style={styles.timeRow}>
                 <Text style={{fontSize: 16, width: 30, fontWeight: 'bold', color: '#666'}}>{index + 1}.</Text>
                 <TouchableOpacity style={styles.timeInput} onPress={() => openTimePicker(item.id, item.date)}>
-                    <Text style={styles.timeInputText}>{formatTime(item.date)} น.</Text>
+                    {/* 🔥 แก้สีตัวอักษรเป็น #333 ให้เห็นชัดบนพื้นขาว 🔥 */}
+                    <Text style={[styles.timeInputText, {color: '#333'}]}>{formatTime(item.date)} น.</Text>
                     <Ionicons name="chevron-down" size={20} color="#666" />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => removeTimeRow(item.id)} style={styles.removeBtn}>
@@ -218,9 +227,40 @@ export default function EditMedicationScreen({ route, navigation }) {
             </View>
         </View>
 
-        {/* Picker Modal */}
+        {/* ✅ Picker Modal สำหรับ iOS */}
         {showTimePicker && (
-            <DateTimePicker value={tempDate} mode="time" display="default" is24Hour={true} onChange={(e, d) => handleTimeConfirm(d)} />
+            Platform.OS === 'ios' ? (
+                <Modal transparent={true} animationType="fade">
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalHeader}>
+                                <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                                    <Text style={{color: 'red', fontSize: 16}}>ยกเลิก</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={confirmIOSTime}>
+                                    <Text style={{color: '#0056b3', fontSize: 16, fontWeight: 'bold'}}>ตกลง</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <DateTimePicker 
+                                value={tempDate} 
+                                mode="time" 
+                                display="spinner" 
+                                is24Hour={true} 
+                                onChange={(e, d) => setTempDate(d || tempDate)} 
+                                style={{height: 200}}
+                            />
+                        </View>
+                    </View>
+                </Modal>
+            ) : (
+                <DateTimePicker 
+                    value={tempDate} 
+                    mode="time" 
+                    display="default" 
+                    is24Hour={true} 
+                    onChange={onTimeSelectedAndroid} 
+                />
+            )
         )}
 
         <TouchableOpacity style={styles.saveBtn} onPress={handleUpdate} disabled={loading}>
@@ -249,11 +289,16 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#0056b3', fontWeight: 'bold' },
   timeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   timeInput: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, backgroundColor: '#fafafa', borderRadius: 10, borderWidth: 1, borderColor: '#ddd' },
-  timeInputText: { fontSize: 16, color: '#333' },
+  timeInputText: { fontSize: 16 },
   removeBtn: { marginLeft: 10, padding: 5 },
   addTimeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10, borderStyle: 'dashed', borderWidth: 1, borderColor: '#0056b3', borderRadius: 10 },
   saveBtn: { backgroundColor: '#0056b3', padding: 15, borderRadius: 30, alignItems: 'center', marginTop: 30 },
   saveBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   sectionHeader: { fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: '#0056b3' },
-  row: { flexDirection: 'row', justifyContent: 'space-between' }
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  
+  // ✅ Modal Styles
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' },
+  modalContent: { backgroundColor: '#404142ff', padding: 20, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, paddingHorizontal: 10 }
 });
