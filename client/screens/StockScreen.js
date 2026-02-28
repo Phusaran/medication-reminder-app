@@ -5,6 +5,8 @@ import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications'; // ✅ 1. เพิ่ม Import Notifications
 import { API_URL } from '../constants/config';
+import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function StockScreen({ navigation, route }) {
   const user = route.params?.user || { id: 0 }; 
@@ -17,23 +19,43 @@ export default function StockScreen({ navigation, route }) {
     if (isFocused && user.id !== 0) fetchMedications();
   }, [isFocused]);
 
-  const fetchMedications = async () => {
+ const fetchMedications = async () => {
     try {
-      // ดึงยาทั้งหมด (ทั้งเปิดและปิด) มาแสดงใน list
-      const response = await axios.get(`${API_URL}/medications/${user.id}?all=true`);
-      
-      const allMeds = response.data;
+      const state = await NetInfo.fetch();
+      let rawData = [];
+
+      if (state.isConnected) {
+          // ✅ 1. ถ้ามีเน็ต: โหลดจาก Server แบบเอาทั้งหมด (สังเกต ?all=true)
+          const response = await axios.get(`${API_URL}/medications/${user.id}?all=true`);
+          rawData = response.data;
+          
+          // ✅ 2. บันทึกแคชแยกต่างหากสำหรับหน้าคลังยา จะได้ไม่ตีกับหน้า Home
+          await AsyncStorage.setItem(`@cached_stock_${user.id}`, JSON.stringify(rawData));
+      } else {
+          // ❌ 3. ถ้าไม่มีเน็ต: ดึงแคชของหน้าคลังยามาแสดง
+          const cachedData = await AsyncStorage.getItem(`@cached_stock_${user.id}`);
+          if (cachedData) {
+              rawData = JSON.parse(cachedData);
+          }
+      }
+
+      // ✅ 4. นำข้อมูลที่ได้มากรองตัวที่ซ้ำกันออก (โค้ดลอจิกเดิมของคุณ)
       const uniqueMeds = [];
       const map = new Map();
 
-      for (const item of allMeds) {
+      for (const item of rawData) {
           if (!map.has(item.user_med_id)) {
               map.set(item.user_med_id, true);
               uniqueMeds.push(item);
           }
       }
+      
+      // อัปเดตข้อมูลขึ้นหน้าจอ
       setMedications(uniqueMeds);
-    } catch (error) { console.log(error); }
+
+    } catch (error) { 
+        console.log("Fetch Error in Stock:", error); 
+    }
   };
 
   // ✅ 2. ฟังก์ชันรีเซ็ตการแจ้งเตือน (Sync ให้ตรงกับ Database)
@@ -62,6 +84,10 @@ export default function StockScreen({ navigation, route }) {
                       body: `อย่าลืมทานยา: ${item.custom_name} (${item.dosage_amount} ${item.dosage_unit})`,
                       sound: true,
                       vibrate: [0, 250, 250, 250], // เพิ่มสั่นเตือน (Android)
+                      data: { 
+                      medName: item.custom_name, 
+                      scheduleId: item.schedule_id 
+                  }
                   },
                   trigger: { 
                       // ✅✅✅ แก้ไขตรงนี้: ต้องระบุ type ให้ชัดเจน ✅✅✅
@@ -125,7 +151,8 @@ export default function StockScreen({ navigation, route }) {
           <View style={{flexDirection: 'row', marginTop: 8}}>
               <TouchableOpacity 
                   style={{marginRight: 15, flexDirection: 'row', alignItems: 'center'}}
-                  onPress={() => navigation.navigate('EditMedication', { medication: item })}
+                  onPress={() => navigation.navigate('EditMedication', { medication: item, 
+                  userId: user.id })}
               >
                   <Ionicons name="create-outline" size={18} color="#0056b3" />
                   <Text style={{color: '#0056b3', marginLeft: 4, fontSize: 12}}>แก้ไข</Text>

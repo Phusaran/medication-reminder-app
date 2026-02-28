@@ -4,7 +4,8 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
-
+import NetInfo from '@react-native-community/netinfo';
+import { syncOfflineQueue } from './utils/offlineQueue';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 
@@ -84,9 +85,13 @@ export default function App() {
   useEffect(() => {
     registerForPushNotificationsAsync();
 
-    // ดักจับการกดที่แจ้งเตือน
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(resp => {
+      // guard against unexpected values (see `ReferenceError: Property 'response' doesn't exist`)
+      if (!resp || !resp.notification) {
+        console.log('notification response object missing or malformed', resp);
+        return;
+      }
+      const data = resp.notification.request.content.data;
       const medName = data.medName;
       const scheduleId = data.scheduleId; 
 
@@ -98,11 +103,19 @@ export default function App() {
       }
     });
 
+    // ✅ เพิ่มโค้ดดักจับเมื่ออินเทอร์เน็ตกลับมาให้ทำการซิงค์คิว
+    const unsubscribeNetInfo = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        syncOfflineQueue();
+      }
+    });
+
     return () => {
-      // ✅ แก้ Error ตรงนี้: ใช้ .remove() แทนคำสั่งเก่า
       if (responseListener.current) {
         responseListener.current.remove();
       }
+      // ✅ ยกเลิกตัวดักจับเมื่อปิดแอป
+      unsubscribeNetInfo();
     };
   }, []);
 

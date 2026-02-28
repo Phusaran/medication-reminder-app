@@ -67,6 +67,9 @@ app.post('/api/upload', upload.single('profileImage'), (req, res) => {
 
 app.post('/api/register', async (req, res) => {
     const { email, password, firstname, lastname } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ message: 'email และ password จำเป็นต้องระบุ' });
+    }
     try {
         const [existingUser] = await db.query('SELECT * FROM user WHERE email = ?', [email]); 
         if (existingUser.length > 0) return res.status(400).json({ message: 'อีเมลนี้ถูกใช้งานแล้ว' });
@@ -88,6 +91,9 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ message: 'email และ password จำเป็นต้องระบุ' });
+    }
     try {
         const [rows] = await db.query('SELECT * FROM user WHERE email = ?', [email]);
         if (rows.length === 0) return res.status(401).json({ message: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' });
@@ -107,6 +113,10 @@ app.post('/api/login', async (req, res) => {
 app.put('/api/users/:id', async (req, res) => {
     const { id } = req.params;
     const { firstname, lastname, password, profile_image } = req.body;
+
+    if (!firstname || !lastname) {
+        return res.status(400).json({ message: 'firstname และ lastname จำเป็นต้องระบุ' });
+    }
 
     try {
         let query = 'UPDATE user SET firstname = ?, lastname = ?';
@@ -223,6 +233,11 @@ app.post('/api/medications', async (req, res) => {
         drug_type 
     } = req.body;
 
+    // basic validation
+    if (!user_id || !custom_name) {
+        return res.status(400).json({ message: 'user_id และ custom_name จำเป็นต้องระบุ' });
+    }
+
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();
@@ -235,23 +250,25 @@ app.post('/api/medications', async (req, res) => {
         );
         const medId = medResult.insertId;
 
-        // ... (ส่วน Insert Stock และ Schedule เหมือนเดิม) ...
+        // insert stock
         await connection.query(
             `INSERT INTO Stock (user_med_id, current_quantity, notify_threshold) VALUES (?, ?, ?)`,
             [medId, initial_quantity, notify_threshold]
         );
 
+        const scheduleIds = [];
         if (Array.isArray(times) && times.length > 0) {
             for (const timeStr of times) {
-                await connection.query(
+                const [schRes] = await connection.query(
                     `INSERT INTO Schedule (user_med_id, time_to_take, days_of_week, dosage_amount) VALUES (?, ?, ?, ?)`,
                     [medId, timeStr, days_of_week, dosage_amount]
                 );
+                scheduleIds.push(schRes.insertId);
             }
         }
 
         await connection.commit();
-        res.status(201).json({ message: 'เพิ่มยาเรียบร้อยแล้ว!', med_id: medId });
+        res.status(201).json({ message: 'เพิ่มยาเรียบร้อยแล้ว!', med_id: medId, schedule_ids: scheduleIds });
 
     } catch (error) {
         await connection.rollback();
@@ -272,6 +289,10 @@ app.put('/api/medications/:medId', async (req, res) => {
         initial_quantity, notify_threshold, intake_timing, start_date, end_date, times,
         disease_group, drug_type 
     } = req.body;
+
+    if (!custom_name) {
+        return res.status(400).json({ message: 'custom_name จำเป็นต้องระบุ' });
+    }
 
     const connection = await db.getConnection();
     try {
@@ -378,6 +399,7 @@ app.delete('/api/medications/:medId', async (req, res) => {
 
 app.post('/api/log-dose', async (req, res) => {
     const { schedule_id, status } = req.body;
+    console.log(`📥 [API /log-dose] ได้รับคำสั่งตัดสต็อก! schedule_id: ${schedule_id}, status: ${status}`);
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();

@@ -4,6 +4,8 @@ import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 // ✅ Import Config
 import { API_URL } from '../constants/config';
+import NetInfo from '@react-native-community/netinfo';
+import { addSymptomToQueue } from '../utils/offlineQueue';
 
 export default function AddSymptomScreen({ route, navigation }) {
   const user = route.params?.user || { id: 0 };
@@ -12,28 +14,43 @@ export default function AddSymptomScreen({ route, navigation }) {
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState(1);
 
-  const handleSave = async () => {
+const handleSave = async () => {
     if (!symptomName) {
       Alert.alert('แจ้งเตือน', 'กรุณาระบุชื่ออาการ');
       return;
     }
 
-    try {
-      // ✅ แก้ Path ให้ถูกต้อง
-      const response = await axios.post(`${API_URL}/symptoms`, {
+    // จัดเตรียมข้อมูล
+    const payload = {
         user_id: user.id,
         symptom_name: symptomName,
         description: description,
         severity: severity
-      });
+    };
 
-      if (response.status === 201) {
-        Alert.alert("สำเร็จ", "บันทึกอาการเรียบร้อยแล้ว");
-        navigation.goBack();
+    try {
+      const state = await NetInfo.fetch();
+      
+      if (state.isConnected) {
+          // ✅ มีเน็ต: บันทึกลงฐานข้อมูลปกติ
+          const response = await axios.post(`${API_URL}/symptoms`, payload);
+          if (response.status === 201) {
+            Alert.alert("สำเร็จ", "บันทึกอาการเรียบร้อยแล้ว");
+          }
+      } else {
+          // ❌ ไม่มีเน็ต: เอาลงคิว
+          await addSymptomToQueue(payload);
+          Alert.alert("โหมดออฟไลน์", "บันทึกอาการป่วยลงเครื่องแล้ว ระบบจะส่งข้อมูลเมื่อมีอินเทอร์เน็ต");
       }
+      
+      navigation.goBack(); // ปิดหน้าต่างกลับไปหน้า Home
+
     } catch (error) {
       console.log(error);
-      Alert.alert("ผิดพลาด", "บันทึกไม่สำเร็จ");
+      // กรณีเน็ตหลุดกลางคัน
+      await addSymptomToQueue(payload);
+      Alert.alert("โหมดออฟไลน์", "เครือข่ายมีปัญหา บันทึกข้อมูลลงเครื่องแล้ว");
+      navigation.goBack();
     }
   };
 

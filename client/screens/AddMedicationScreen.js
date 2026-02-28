@@ -66,9 +66,21 @@ export default function AddMedicationScreen({ route, navigation }) {
   };
 
   const calculateDates = () => {
-    const start = new Date(); let end = new Date();
-    if (durationMode === 'days') { const days = parseInt(durationDays) || 0; end.setDate(start.getDate() + days); } else { end = endDate; }
-    return { startDate: start.toISOString().split('T')[0], endDate: end.toISOString().split('T')[0] };
+    const start = new Date();
+    let end = new Date();
+    if (durationMode === 'days') {
+      const days = parseInt(durationDays) || 0;
+      end.setDate(start.getDate() + days);
+    } else {
+      end = endDate;
+    }
+    const toLocalYMD = d => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    return { startDate: toLocalYMD(start), endDate: toLocalYMD(end) };
   };
   
   const getIntakeText = (key) => { const map = { 'before_meal': 'ก่อนอาหาร', 'after_meal': 'หลังอาหาร', 'bedtime': 'ก่อนนอน', 'empty_stomach': 'ท้องว่าง', 'as_needed': 'ตามอาการ' }; return map[key] || ''; };
@@ -115,16 +127,22 @@ export default function AddMedicationScreen({ route, navigation }) {
   const formatTime = (timestamp) => { const d = new Date(timestamp); return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`; };
   const generateFinalTimeStrings = () => { if (scheduleType === 'specific') return timeList.map(t => formatTime(t.date) + ":00"); const times = []; const start = new Date(startTime); const interval = parseInt(intervalHours) || 4; let current = new Date(start); const endOfDay = new Date(start); endOfDay.setHours(23, 59, 59, 999); if (interval <= 0) return [formatTime(startTime) + ":00"]; while (current <= endOfDay) { times.push(formatTime(current) + ":00"); current.setHours(current.getHours() + interval); } return times; };
 
-  const scheduleNotifications = async (medName, timeStrings) => { 
-      for (const timeStr of timeStrings) { 
-          const [hours, minutes] = timeStr.split(':').map(Number); 
-          // เพิ่มหน่วยเข้าไปในข้อความแจ้งเตือนด้วย
+  const scheduleNotifications = async (medName, timeStrings, scheduleIds = []) => { 
+      for (let i = 0; i < timeStrings.length; i++) {
+          const timeStr = timeStrings[i];
+          const scheduleId = scheduleIds[i] || null;
+          const [hours, minutes] = timeStr.split(':').map(Number);
+          if (isNaN(hours) || isNaN(minutes)) continue;
           await Notifications.scheduleNotificationAsync({ 
               content: { 
                   title: "⏰ ได้เวลาทานยาแล้ว!", 
                   body: `อย่าลืมทานยา: ${medName} (${dosageAmount} ${unit} - ${getIntakeText(intakeTiming)})`, 
                   sound: true,
-                  vibrate: [0, 250, 250, 250]
+                  vibrate: [0, 250, 250, 250],
+                  data: { 
+                      medName,
+                      scheduleId
+                  }
               }, 
               trigger: { 
                   type: Notifications.SchedulableTriggerInputTypes.CALENDAR, 
@@ -133,7 +151,7 @@ export default function AddMedicationScreen({ route, navigation }) {
                   repeats: true 
               } 
           }); 
-      } 
+      }
   };
 
   const handleSave = async () => {
@@ -157,11 +175,11 @@ export default function AddMedicationScreen({ route, navigation }) {
             instruction: instruction || getIntakeText(intakeTiming),
             dosage_unit: unit,
             image_url: imageUrl,
-            initial_quantity: parseInt(quantity),
+            initial_quantity: parseInt(quantity) || 0,
             notify_threshold: parseInt(notifyThreshold) || 5,
             days_of_week: 'Everyday',
             // ✅✅✅ ส่งค่าจำนวนที่ทาน (เช่น 2) ไปบันทึก
-            dosage_amount: dosageAmount || 1, 
+            dosage_amount: parseInt(dosageAmount) || 1, 
             intake_timing: intakeTiming,
             start_date: startDate,
             end_date: finalEndDate,
@@ -170,8 +188,9 @@ export default function AddMedicationScreen({ route, navigation }) {
             drug_type: drugType 
         };
 
-        await axios.post(`${API_URL}/medications`, payload);
-        await scheduleNotifications(name, timeStrings);
+        const saveRes = await axios.post(`${API_URL}/medications`, payload);
+        const scheduleIds = saveRes.data.schedule_ids || [];
+        await scheduleNotifications(name, timeStrings, scheduleIds);
         
         Alert.alert("สำเร็จ", "เพิ่มยาเรียบร้อย!", [
             { 

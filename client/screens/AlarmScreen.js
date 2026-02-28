@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import NetInfo from '@react-native-community/netinfo';
+import { addDoseToQueue } from '../utils/offlineQueue';
+
 // ✅ Import Config
 import { API_URL } from '../constants/config';
 
@@ -16,19 +19,37 @@ export default function AlarmScreen({ route, navigation }) {
     }
 
     setLoading(true);
+    const payload = { schedule_id: scheduleId, status: 'taken' };
+
+    // ✅ เพิ่ม Log ดูว่าหน้าแจ้งเตือนส่งค่าอะไรมาบ้าง
+    console.log("⏰ [AlarmScreen] กำลังส่งข้อมูล:", payload);
+
     try {
-        // ✅ แก้ Path: /log-dose
-        await axios.post(`${API_URL}/log-dose`, {
-            schedule_id: scheduleId,
-            status: 'taken'
-        });
-        
-        Alert.alert("เรียบร้อย", "บันทึกและตัดสต็อกยาแล้ว!");
+        const state = await NetInfo.fetch();
+        if (state.isConnected) {
+            // ✅ มีเน็ต ยิง API ปกติ
+            const response = await axios.post(`${API_URL}/log-dose`, payload);
+            
+            // ✅ เพิ่มการดักจับข้อความแจ้งเตือนจาก Server (เหมือนหน้า Home)
+            if (response.data.message === 'วันนี้คุณบันทึกยานี้ไปแล้ว') {
+                Alert.alert("แจ้งเตือน", "ยาในมื้อนี้ ถูกบันทึกว่าทานไปแล้ว ระบบจึงไม่ตัดสต็อกซ้ำครับ");
+            } else if (response.data.alert) {
+                 Alert.alert("แจ้งเตือน", response.data.alert);
+            } else {
+                 Alert.alert("เรียบร้อย", "บันทึกและตัดสต็อกยาแล้ว!");
+            }
+        } else {
+            // ❌ ไม่มีเน็ต เอาลงคิว
+            await addDoseToQueue(payload);
+            Alert.alert("โหมดออฟไลน์", "บันทึกไว้ในเครื่องแล้ว ระบบจะซิงค์เมื่อมีอินเทอร์เน็ต");
+        }
         navigation.goBack(); 
 
     } catch (error) {
-        console.log(error);
-        Alert.alert("ผิดพลาด", "เชื่อมต่อ Server ไม่ได้");
+        console.log("AlarmScreen Error:", error);
+        // ❌ เน็ตหลุดจังหวะที่ยิง API พอดี ก็เอาลงคิวเช่นกัน
+        await addDoseToQueue(payload);
+        Alert.alert("โหมดออฟไลน์", "บันทึกข้อมูลไว้ในเครื่องแล้ว");
         navigation.goBack();
     } finally {
         setLoading(false);

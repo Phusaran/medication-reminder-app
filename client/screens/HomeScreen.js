@@ -4,6 +4,10 @@ import axios from 'axios';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../constants/config'; 
+import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { addDoseToQueue } from '../utils/offlineQueue';
+import { syncOfflineQueue } from '../utils/offlineQueue';
 
 export default function HomeScreen({ route, navigation }) {
   const user = route.params?.user || { id: 0, firstname: 'Guest' }; 
@@ -23,18 +27,27 @@ export default function HomeScreen({ route, navigation }) {
 
   const fetchMedications = async () => {
     try {
-      const response = await axios.get(`${API_URL}/medications/${user.id}`);
-      const rawData = response.data;
+      const state = await NetInfo.fetch();
+      let rawData = [];
 
-      // ✅ กรองข้อมูลซ้ำแบบฉลาด (Smart Deduplicate) - เวอร์ชันอัปเกรด
+      if (state.isConnected) {
+          // ✅ มีเน็ต โหลดจาก Server และบันทึกแคช
+          const response = await axios.get(`${API_URL}/medications/${user.id}`);
+          rawData = response.data;
+          await AsyncStorage.setItem(`@cached_meds_${user.id}`, JSON.stringify(rawData));
+      } else {
+          // ❌ ไม่มีเน็ต ดึงจากแคชมาใช้ไปก่อน
+          const cachedData = await AsyncStorage.getItem(`@cached_meds_${user.id}`);
+          if (cachedData) rawData = JSON.parse(cachedData);
+      }
+
+      // ✅ กรองข้อมูลซ้ำแบบฉลาด (Smart Deduplicate) - ตามโค้ดเดิมของคุณ
       const uniqueData = [];
       const map = new Map();
 
       for (const item of rawData) {
-          // 🛠️ แก้ไขตรงนี้: เปลี่ยนจากใช้ user_med_id เป็น custom_name
-          // เพื่อให้ยาชื่อเดียวกัน ที่เวลาเดียวกัน ถูกนับเป็นอันเดียว (แม้จะมาจากคนละรายการใน DB)
           const uniqueKey = item.schedule_id 
-              ? `name_${item.custom_name}_time_${item.time_to_take}`  // กรองจาก ชื่อ + เวลา
+              ? `name_${item.custom_name}_time_${item.time_to_take}` 
               : `name_${item.custom_name}`;                            
           
           if (!map.has(uniqueKey)) {
@@ -42,7 +55,6 @@ export default function HomeScreen({ route, navigation }) {
               uniqueData.push(item);
           }
       }
-
       setAllMeds(uniqueData);
 
     } catch (error) { console.log("Fetch Error:", error); }
@@ -91,21 +103,50 @@ export default function HomeScreen({ route, navigation }) {
 
   }, [allMeds, sortBy]);
 
-  const handleTakePill = async (item) => {
+const handleTakePill = async (item) => {
+    // 1. เตรียมข้อมูลที่จะส่งไปเซิร์ฟเวอร์
+    const payload = {
+        user_med_id: item.user_med_id,
+        schedule_id: item.schedule_id,
+        status: 'taken'
+    };
+
+    // 🔍 ตรวจสอบว่าข้อมูลมี schedule_id และ user_med_id ถูกต้องหรือไม่
+    console.log("📤 กำลังส่งข้อมูลไปเซิร์ฟเวอร์:", payload);
+
     try {
-        const response = await axios.post(`${API_URL}/log-dose`, {
-           user_med_id: item.user_med_id,
-           schedule_id: item.schedule_id,
-           status: 'taken'
-       });
-       
-       if (response.status === 200) {
-           if (response.data.alert) Alert.alert("แจ้งเตือน", response.data.alert);
-           fetchMedications(); 
-       }
+        const state = await NetInfo.fetch();
+        if (state.isConnected) {
+            // ✅ มีเน็ต: ส่งข้อมูลไปที่ Server
+            const response = await axios.post(`${API_URL}/log-dose`, payload);
+            
+            // 🚨 ดักจับกรณีที่ระบบ Server ฟ้องว่า "วันนี้กินยานี้ไปแล้ว" (เลยไม่ตัดสต็อก)
+            if (response.data.message === 'วันนี้คุณบันทึกยานี้ไปแล้ว') {
+                Alert.alert("แจ้งเตือน", "ยาในมื้อนี้ ถูกบันทึกว่าทานไปแล้ว ระบบจึงไม่ตัดสต็อกซ้ำครับ");
+            } 
+            // 🚨 ดักจับกรณีที่ระบบ Server ฟ้องว่ายาใกล้หมด หรือหมดแล้ว
+            else if (response.data.alert) {
+                 Alert.alert("แจ้งเตือน", response.data.alert);
+            } else {
+                 // ถ้าบันทึกและตัดสต็อกปกติ โดยยาไม่หมด (ใส่ Alert ไว้เทสเพื่อให้มั่นใจ)
+                 // Alert.alert("สำเร็จ", "บันทึกและตัดสต็อกเรียบร้อย"); 
+            }
+            
+        } else {
+            // ❌ ไม่มีเน็ต: เอาลงคิวออฟไลน์
+            await addDoseToQueue(payload);
+            Alert.alert("โหมดออฟไลน์", "บันทึกไว้ในเครื่องแล้ว ระบบจะซิงค์เมื่อมีอินเทอร์เน็ต");
+        }
+        
+        // 🔄 โหลดข้อมูลตารางยาใหม่ เพื่ออัปเดตตัวเลขหน้าจอให้ตรงกับความจริง
+        fetchMedications(); 
+
     } catch (error) { 
-        Alert.alert("ผิดพลาด", "ไม่สามารถบันทึกได้"); 
-        console.error(error);
+        // ❌ กรณีเน็ตหลุดตอนกำลังส่งพอดี หรือ Server เออเร่อ
+        await addDoseToQueue(payload);
+        Alert.alert("โหมดออฟไลน์", "เครือข่ายมีปัญหา บันทึกข้อมูลลงเครื่องแล้ว");
+        fetchMedications();
+        console.error("Take Pill Error:", error);
     }
   };
 
@@ -116,7 +157,14 @@ export default function HomeScreen({ route, navigation }) {
     const isTaken = item.is_taken === 1;
 
     const now = new Date();
-    const [hours, minutes] = item.time_to_take ? item.time_to_take.split(':') : ['00', '00'];
+    let [hours, minutes] = ['00', '00'];
+    if (item.time_to_take) {
+        const parts = item.time_to_take.split(':').map(p => parseInt(p, 10));
+        if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            hours = parts[0];
+            minutes = parts[1];
+        }
+    }
     const scheduledTime = new Date();
     scheduledTime.setHours(hours, minutes, 0, 0);
 
@@ -198,6 +246,13 @@ export default function HomeScreen({ route, navigation }) {
         <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('AddSymptom', { user })}>
             <Ionicons name="thermometer" size={24} color="#d32f2f" />
             <Text style={styles.actionText}>บันทึกอาการป่วย</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+            style={[styles.actionButton, {backgroundColor: '#ffeb3b', marginLeft: 10}]} 
+            onPress={() => syncOfflineQueue()}
+>
+            <Ionicons name="sync" size={24} color="#333" />
+            <Text style={styles.actionText}>บังคับซิงค์</Text>
         </TouchableOpacity>
       </View>
 

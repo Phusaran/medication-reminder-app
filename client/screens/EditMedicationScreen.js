@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../constants/config';
+import * as Notifications from 'expo-notifications';
 
 export default function EditMedicationScreen({ route, navigation }) {
   const { medication } = route.params;
@@ -98,7 +99,51 @@ export default function EditMedicationScreen({ route, navigation }) {
   const removeTimeRow = (id) => {
       setTimeList(prev => prev.filter(item => item.id !== id));
   };
+// ✅ เพิ่มฟังก์ชันรีเซ็ตการแจ้งเตือน (Sync ให้ตรงกับ Database)
+  const resyncNotifications = async () => {
+      try {
+          // A. ยกเลิกของเก่าทั้งหมดก่อน
+          await Notifications.cancelAllScheduledNotificationsAsync();
 
+          // B. ดึงข้อมูลยาที่ยังเปิดใช้งานอยู่มาใหม่ 
+          // (หมายเหตุ: ตรวจสอบว่าใน route.params มี userId ส่งมาด้วย หรือใช้ค่าจาก medication.user_id)
+          const userId = medication.user_id || route.params?.userId; 
+          if (!userId) return;
+
+          const response = await axios.get(`${API_URL}/medications/${userId}`); 
+          const activeSchedules = response.data;
+
+          // C. วนลูปตั้งปลุกใหม่ทีละอัน
+          for (const item of activeSchedules) {
+              if (!item.time_to_take) continue;
+
+              const [hours, minutes] = item.time_to_take.split(':').map(Number);
+              if (isNaN(hours) || isNaN(minutes)) continue;
+
+              await Notifications.scheduleNotificationAsync({
+                  content: {
+                      title: "⏰ ได้เวลาทานยาแล้ว!",
+                      body: `อย่าลืมทานยา: ${item.custom_name} (${item.dosage_amount} ${item.dosage_unit})`,
+                      sound: true,
+                      vibrate: [0, 250, 250, 250],
+                      data: { 
+                          medName: item.custom_name, 
+                          scheduleId: item.schedule_id 
+                      }
+                  },
+                  trigger: { 
+                      type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+                      hour: hours, 
+                      minute: minutes, 
+                      repeats: true 
+                  }
+              });
+          }
+          console.log("Notifications Resynced successfully after edit!");
+      } catch (error) {
+          console.log("Resync Error:", error);
+      }
+  };
   const handleUpdate = async () => {
       setLoading(true);
       try {
@@ -112,20 +157,29 @@ export default function EditMedicationScreen({ route, navigation }) {
 
           const timeStrings = timeList.map(t => formatTime(t.date) + ":00");
           
+          const toLocalYMD = d => {
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, '0');
+              const day = String(d.getDate()).padStart(2, '0');
+              return `${y}-${m}-${day}`;
+          };
           const payload = {
               custom_name: name,
               instruction,
               dosage_unit: unit,
-              initial_quantity: parseInt(quantity),
+              initial_quantity: parseInt(quantity) || 0,
               notify_threshold: 5,
               image_url: finalImageUrl,
               intake_timing: intakeTiming,
-              start_date: new Date().toISOString().split('T')[0],
-              end_date: endDate.toISOString().split('T')[0],
+              start_date: toLocalYMD(new Date()),
+              end_date: toLocalYMD(endDate),
               times: timeStrings
           };
 
           await axios.put(`${API_URL}/medications/${medication.user_med_id}`, payload);
+          
+          await resyncNotifications();
+          
           Alert.alert('สำเร็จ', 'แก้ไขข้อมูลเรียบร้อย', [
               { text: 'ตกลง', onPress: () => navigation.goBack() }
           ]);
