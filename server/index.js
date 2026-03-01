@@ -722,9 +722,10 @@ app.post('/api/caregivers/link-qr', async (req, res) => {
 });
 
 // ==========================================
-// 6. ส่วน Admin
+// 6. ส่วน Admin (ฉบับสมบูรณ์)
 // ==========================================
 
+// 6.1 Admin Login
 app.post('/api/admin/login', async (req, res) => {
     const { username, password } = req.body;
     try {
@@ -737,56 +738,134 @@ app.post('/api/admin/login', async (req, res) => {
 
         res.json(admin);
     } catch (error) {
-        console.error("Admin Login Error:", error);
         res.status(500).json({ message: 'Error logging in' });
     }
 });
 
+// 6.2 การจัดการผู้ใช้งาน (User Management)
 app.get('/api/admin/users', async (req, res) => {
     try {
         const [rows] = await db.query('SELECT user_id AS id, firstname, lastname, email FROM user');
         res.json(rows);
     } catch (error) {
-        console.error(error);
         res.status(500).json({ message: 'Error fetching users' });
+    }
+});
+
+// ✅ แก้ไขข้อมูลผู้ใช้ (รวมรูปโปรไฟล์)
+app.put('/api/admin/users/:id', async (req, res) => {
+    const { id } = req.params;
+    const { firstname, lastname, email, profile_image } = req.body;
+    try {
+        await db.query(
+            "UPDATE user SET firstname = ?, lastname = ?, email = ?, profile_image = ? WHERE user_id = ?",
+            [firstname, lastname, email, profile_image, id]
+        );
+        res.json({ message: "อัปเดตข้อมูลผู้ใช้และรูปภาพเรียบร้อยแล้ว" });
+    } catch (error) {
+        res.status(500).json({ message: "ไม่สามารถแก้ไขข้อมูลได้" });
     }
 });
 
 app.delete('/api/admin/users/:id', async (req, res) => {
     const { id } = req.params;
     try {
+        // 1. ลบความสัมพันธ์ผู้ดูแล (ตาราง Caring)
+        await db.query('DELETE FROM Caring WHERE user_id = ? OR caregiver_id = ?', [id, id]);
+        
+        // 2. ลบประวัติอาการป่วย (ตาราง Symptom_Log)
+        await db.query('DELETE FROM Symptom_Log WHERE user_id = ?', [id]);
+        
+        // 3. ลบประวัติการทานยา (ตาราง Medication_Log) โดยอ้างอิงผ่าน Schedule และ User_Medication
+        // แก้ไข: เปลี่ยน Medication_Schedule เป็น Schedule และ user_medication เป็น User_Medication
+        await db.query(`
+            DELETE FROM Medication_Log 
+            WHERE schedule_id IN (
+                SELECT schedule_id FROM Schedule 
+                WHERE user_med_id IN (
+                    SELECT user_med_id FROM User_Medication WHERE user_id = ?
+                )
+            )`, [id]);
+        
+        // 4. ลบตารางเวลาการทานยา (ตาราง Schedule)
+        await db.query(`
+            DELETE FROM Schedule 
+            WHERE user_med_id IN (
+                SELECT user_med_id FROM User_Medication WHERE user_id = ?
+            )`, [id]);
+            
+        // 5. ลบข้อมูลสต็อกยา (ตาราง Stock)
+        await db.query(`
+            DELETE FROM Stock 
+            WHERE user_med_id IN (
+                SELECT user_med_id FROM User_Medication WHERE user_id = ?
+            )`, [id]);
+        
+        // 6. ลบรายการยาของผู้ใช้ (ตาราง User_Medication)
+        await db.query('DELETE FROM User_Medication WHERE user_id = ?', [id]);
+
+        // 7. สุดท้าย ลบตัวผู้ใช้งาน (ตาราง user)
         await db.query('DELETE FROM user WHERE user_id = ?', [id]);
-        res.json({ message: 'ลบผู้ใช้งานเรียบร้อย' });
+
+        res.json({ message: 'ลบผู้ใช้งานและข้อมูลที่เกี่ยวข้องทั้งหมดเรียบร้อยแล้ว' });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Error deleting user' });
+        console.error("Delete User Error:", error);
+        res.status(500).json({ 
+            message: 'เกิดข้อผิดพลาดในการลบผู้ใช้', 
+            error: error.message 
+        });
     }
 });
 
+// 6.3 การจัดการคลังยาหลัก (Medication Master)
 app.get('/api/admin/medications', async (req, res) => {
     try {
         const [rows] = await db.query('SELECT * FROM Medication_Master');
         res.json(rows);
     } catch (error) {
-        console.error(error);
         res.status(500).json({ message: 'Error fetching master medications' });
     }
 });
 
 app.post('/api/admin/medications', async (req, res) => {
-    const { generic_name, description, dosage_unit } = req.body;
+    const { generic_name, description, dosage_unit, image_url, drug_type, default_disease_group } = req.body;
     try {
         await db.query(
-            'INSERT INTO Medication_Master (generic_name, description, dosage_unit) VALUES (?, ?, ?)',
-            [generic_name, description, dosage_unit]
+            'INSERT INTO Medication_Master (generic_name, description, dosage_unit, image_url, drug_type, default_disease_group) VALUES (?, ?, ?, ?, ?, ?)',
+            [generic_name, description, dosage_unit, image_url, drug_type, default_disease_group]
         );
         res.status(201).json({ message: 'เพิ่มยาเข้าคลังหลักเรียบร้อย' });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Error adding master medication' });
+        res.status(500).json({ message: 'Error adding medication' });
     }
 });
 
+// ✅ แก้ไขยาในคลังหลัก (รวมรูปภาพ Master Med)
+app.put('/api/admin/master-medications/:id', async (req, res) => {
+    const { id } = req.params;
+    const { generic_name, description, dosage_unit, image_url, drug_type, default_disease_group } = req.body;
+    try {
+        await db.query(
+            "UPDATE Medication_Master SET generic_name = ?, description = ?, dosage_unit = ?, image_url = ?, drug_type = ?, default_disease_group = ? WHERE med_id = ?",
+            [generic_name, description, dosage_unit, image_url, drug_type, default_disease_group, id]
+        );
+        res.json({ message: "อัปเดตข้อมูลยาหลักเรียบร้อยแล้ว" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "ไม่สามารถแก้ไขข้อมูลได้" });
+    }
+});
+
+app.delete('/api/admin/master-medications/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await db.query("DELETE FROM Medication_Master WHERE med_id = ?", [id]);
+        res.json({ message: "ลบยาออกจากคลังหลักเรียบร้อย" });
+    } catch (err) {
+        res.status(500).json({ message: "ลบไม่ได้" });
+    }
+});
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
