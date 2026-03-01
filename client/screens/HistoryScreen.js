@@ -218,10 +218,26 @@ export default function HistoryScreen({ route, navigation }) {
         </TouchableOpacity>
       )}
       <View style={[styles.header, caregiver && { paddingTop: 15 }]}>
-          <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={28} color="#333" />
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>ประวัติสุขภาพ</Text>
-          <TouchableOpacity onPress={generatePDF}><Ionicons name="document-text-outline" size={24} color="#0056b3" /></TouchableOpacity>
+          
+          {/* ✅ ส่วน Header ที่แก้ไขใหม่ เพื่อรวมปุ่มกราฟและปุ่ม PDF */}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TouchableOpacity 
+                  onPress={() => navigation.navigate('Statistics', { user })} 
+                  style={{ marginRight: 15 }}
+              >
+                  <Ionicons name="bar-chart-outline" size={24} color="#0056b3" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity onPress={generatePDF}>
+                  <Ionicons name="document-text-outline" size={24} color="#0056b3" />
+              </TouchableOpacity>
+          </View>
       </View>
+
       <View style={styles.tabContainer}>
         <TouchableOpacity style={[styles.tabButton, activeTab === 'meds' && styles.activeTab]} onPress={() => setActiveTab('meds')}><Text style={[styles.tabText, activeTab === 'meds' && styles.activeTabText]}>💊 การทานยา</Text></TouchableOpacity>
         <TouchableOpacity style={[styles.tabButton, activeTab === 'symptoms' && styles.activeTab]} onPress={() => setActiveTab('symptoms')}><Text style={[styles.tabText, activeTab === 'symptoms' && styles.activeTabText]}>🤒 อาการป่วย</Text></TouchableOpacity>

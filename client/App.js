@@ -30,7 +30,8 @@ import EditProfileScreen from './screens/EditProfileScreen';
 import CaregiverProfileScreen from './screens/CaregiverProfileScreen';
 import EditMedicationScreen from './screens/EditMedicationScreen';
 import MasterSearchScreen from './screens/MasterSearchScreen';
-
+import StatisticsScreen from './screens/StatisticsScreen';
+import HelpScreen from './screens/HelpScreen';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -162,9 +163,15 @@ export default function App() {
         <Stack.Screen name="CaregiverProfile" component={CaregiverProfileScreen} />
         <Stack.Screen name="EditMedication" component={EditMedicationScreen} />
         <Stack.Screen name="MasterSearch" component={MasterSearchScreen} options={{ title: 'ค้นหายา' }} />
+        <Stack.Screen name="Help" component={HelpScreen} options={{ headerShown: false }} />
         <Stack.Screen
         name="Stock"
         component={StockScreen}
+        />
+        <Stack.Screen 
+          name="Statistics" 
+          component={StatisticsScreen} 
+          options={{ headerShown: true, title: 'สถิติการทานยา' }} 
         />
         <Stack.Screen 
           name="Alarm" 
