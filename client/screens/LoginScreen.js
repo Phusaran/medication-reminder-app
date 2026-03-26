@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Image } from 'react-native';
 import axios from 'axios';
-// ✅ Import Config
+// ✅ Import Config และ KeyboardWrapper
 import { API_URL } from '../constants/config';
+import KeyboardWrapper from '../components/KeyboardWrapper';
 
 export default function LoginScreen({ navigation }) {
   const [role, setRole] = useState('user');
@@ -21,7 +22,6 @@ export default function LoginScreen({ navigation }) {
     }
     
     try {
-      // ✅ ใช้ API_URL
       const response = await axios.post(`${API_URL}${endpoint}`, payload);
       
       if (response.status === 200) {
@@ -41,48 +41,55 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // ... (ส่วน render และ styles เหมือนเดิม ไม่ต้องแก้)
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3063/3063822.png' }} style={styles.logo} />
-        <Text style={styles.headerText}>CARE U</Text>
-      </View>
-
-      <View style={styles.formContainer}>
-        <View style={styles.toggleContainer}>
-            {['user', 'caregiver', 'admin'].map((r) => (
-                <TouchableOpacity 
-                    key={r}
-                    style={[styles.toggleBtn, role === r && styles.activeBtn]} 
-                    onPress={() => setRole(r)}
-                >
-                    <Text style={[styles.toggleText, role === r && styles.activeText]}>
-                        {r === 'user' ? 'ผู้ใช้' : r === 'caregiver' ? 'ผู้ดูแล' : 'Admin'}
-                    </Text>
-                </TouchableOpacity>
-            ))}
+    // ✅ เอา KeyboardWrapper ครอบนอกสุดแทน View
+    <KeyboardWrapper>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3063/3063822.png' }} style={styles.logo} />
+          <Text style={styles.headerText}>CARE U</Text>
         </View>
 
-        <Text style={styles.label}>{role === 'admin' ? 'ชื่อผู้ใช้ (Username)' : 'อีเมล'}</Text>
-        <TextInput style={styles.input} placeholder={role === 'admin' ? "admin" : "ระบุอีเมล"} value={email} onChangeText={setEmail} autoCapitalize="none" />
+        <View style={styles.formContainer}>
+          <View style={styles.toggleContainer}>
+              {['user', 'caregiver', 'admin'].map((r) => (
+                  <TouchableOpacity 
+                      key={r}
+                      style={[styles.toggleBtn, role === r && styles.activeBtn]} 
+                      onPress={() => setRole(r)}
+                  >
+                      <Text style={[styles.toggleText, role === r && styles.activeText]}>
+                          {r === 'user' ? 'ผู้ใช้' : r === 'caregiver' ? 'ผู้ดูแล' : 'Admin'}
+                      </Text>
+                  </TouchableOpacity>
+              ))}
+          </View>
 
-        <Text style={styles.label}>รหัสผ่าน</Text>
-        <TextInput style={styles.input} placeholder="ระบุรหัสผ่าน" value={password} onChangeText={setPassword} secureTextEntry />
+          <Text style={styles.label}>{role === 'admin' ? 'ชื่อผู้ใช้ (Username)' : 'อีเมล'}</Text>
+          <TextInput style={styles.input} placeholder={role === 'admin' ? "admin" : "ระบุอีเมล"} value={email} onChangeText={setEmail} autoCapitalize="none" />
 
-        <TouchableOpacity style={styles.button} onPress={handleLogin}>
-          <Text style={styles.buttonText}>เข้าสู่ระบบ</Text>
-        </TouchableOpacity>
+          <Text style={styles.label}>รหัสผ่าน</Text>
+          <TextInput style={styles.input} placeholder="ระบุรหัสผ่าน" value={password} onChangeText={setPassword} secureTextEntry />
 
-        {role === 'user' && (
-            <View style={styles.registerContainer}>
-                <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-                    <Text style={{ color: '#0056b3', fontSize: 16 }}>ยังไม่มีบัญชี? สมัครสมาชิก</Text>
-                </TouchableOpacity>
-            </View>
-        )}
+          <TouchableOpacity style={styles.button} onPress={handleLogin}>
+            <Text style={styles.buttonText}>เข้าสู่ระบบ</Text>
+          </TouchableOpacity>
+
+          {role === 'user' && (
+              <View style={styles.registerContainer}>
+                  <TouchableOpacity 
+                    onPress={() => navigation.navigate('Register', { initialRole: role })} 
+                    style={styles.linkContainer}
+                  >
+                  <Text style={styles.linkText}>
+                    {role === 'user' ? 'ยังไม่มีบัญชีผู้ป่วย? สมัครสมาชิก' : 'ยังไม่มีบัญชีผู้ดูแล? สมัครสมาชิกผู้ดูแล'}
+                  </Text>
+                  </TouchableOpacity>
+              </View>
+          )}
+        </View>
       </View>
-    </View>
+    </KeyboardWrapper>
   );
 }
 
@@ -101,5 +108,6 @@ const styles = StyleSheet.create({
   input: { borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: 10, marginBottom: 20, fontSize: 16 },
   button: { backgroundColor: '#0056b3', padding: 15, borderRadius: 25, alignItems: 'center', marginTop: 10 },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  registerContainer: { flexDirection: 'row', justifyContent: 'center', marginTop: 20 }
+  registerContainer: { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
+  linkText: { color: '#0056b3', fontSize: 14, fontWeight: 'bold' }
 });

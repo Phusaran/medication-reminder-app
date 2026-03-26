@@ -6,6 +6,8 @@ import * as Notifications from 'expo-notifications';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../constants/config';
+// ✅ Import KeyboardWrapper
+import KeyboardWrapper from '../components/KeyboardWrapper';
 
 export default function AddMedicationScreen({ route, navigation }) {
   const { user } = route.params;
@@ -16,17 +18,15 @@ export default function AddMedicationScreen({ route, navigation }) {
   const [drugType, setDrugType] = useState('tablet'); 
   const [instruction, setInstruction] = useState('');
   
-  // ✅ 1. เพิ่ม State สำหรับจำนวนที่ทานต่อครั้ง
   const [dosageAmount, setDosageAmount] = useState('1'); 
   const [unit, setUnit] = useState('เม็ด');
 
-  const [quantity, setQuantity] = useState('30'); // สต็อกคงเหลือ
+  const [quantity, setQuantity] = useState('30'); 
   const [notifyThreshold, setNotifyThreshold] = useState('5'); 
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [existingGroups, setExistingGroups] = useState([]);
 
-  // Time & Schedule Vars
   const [intakeTiming, setIntakeTiming] = useState('after_meal'); 
   const [durationMode, setDurationMode] = useState('days'); 
   const [durationDays, setDurationDays] = useState('7'); 
@@ -59,10 +59,33 @@ export default function AddMedicationScreen({ route, navigation }) {
   }, []);
 
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return Alert.alert('ขออภัย', 'ต้องการสิทธิ์เข้าถึงรูปภาพ');
-    let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaType.Images, allowsEditing: true, aspect: [1, 1], quality: 0.5 });
-    if (!result.canceled) setImage(result.assets[0].uri);
+    try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('ขออภัย', 'แอปต้องการสิทธิ์เข้าถึงแกลลอรี่เพื่อเลือกรูปภาพ');
+          return;
+        }
+      }
+
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, 
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.log("Image Picker Error:", error);
+      if (Platform.OS !== 'web') {
+         Alert.alert("ผิดพลาด", "ไม่สามารถเปิดแกลลอรี่รูปภาพได้");
+      } else {
+         window.alert("ไม่สามารถเปิดแกลลอรี่รูปภาพได้");
+      }
+    }
   };
 
   const calculateDates = () => {
@@ -86,7 +109,6 @@ export default function AddMedicationScreen({ route, navigation }) {
   const getIntakeText = (key) => { const map = { 'before_meal': 'ก่อนอาหาร', 'after_meal': 'หลังอาหาร', 'bedtime': 'ก่อนนอน', 'empty_stomach': 'ท้องว่าง', 'as_needed': 'ตามอาการ' }; return map[key] || ''; };
   const getDrugTypeText = (key) => { const map = { 'tablet': 'เม็ด', 'capsule': 'แคปซูล', 'liquid': 'ยาน้ำ', 'injection': 'ยาฉีด', 'external': 'ภายนอก', 'spray': 'ยาพ่น', 'powder': 'ยาผง', 'other': 'อื่นๆ' }; return map[key] || key; };
 
-  // --- Time Picker Logic ---
   const openTimePicker = (id = null, initialDateTimestamp) => { 
       setCurrentEditingId(id); 
       setTempDate(new Date(initialDateTimestamp)); 
@@ -112,7 +134,6 @@ export default function AddMedicationScreen({ route, navigation }) {
       setShowTimePicker(false);
   };
 
-  // --- Date Picker Logic ---
   const onDateSelectedAndroid = (event, selectedDate) => {
       setShowEndDatePicker(false);
       if (selectedDate) setEndDate(selectedDate);
@@ -178,7 +199,6 @@ export default function AddMedicationScreen({ route, navigation }) {
             initial_quantity: parseInt(quantity) || 0,
             notify_threshold: parseInt(notifyThreshold) || 5,
             days_of_week: 'Everyday',
-            // ✅✅✅ ส่งค่าจำนวนที่ทาน (เช่น 2) ไปบันทึก
             dosage_amount: parseInt(dosageAmount) || 1, 
             intake_timing: intakeTiming,
             start_date: startDate,
@@ -193,10 +213,7 @@ export default function AddMedicationScreen({ route, navigation }) {
         await scheduleNotifications(name, timeStrings, scheduleIds);
         
         Alert.alert("สำเร็จ", "เพิ่มยาเรียบร้อย!", [
-            { 
-                text: "ตกลง", 
-                onPress: () => navigation.navigate('Home', { user: user }) 
-            }
+            { text: "ตกลง", onPress: () => navigation.navigate('Home', { user: user }) }
         ]);
 
     } catch (error) { console.log(error); Alert.alert("ผิดพลาด", "บันทึกไม่สำเร็จ"); } 
@@ -205,202 +222,203 @@ export default function AddMedicationScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* 🟢 Header ให้อยู่นอกสุด จะได้ไม่โดนคีย์บอร์ดดัน */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={28} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>เพิ่มยาใหม่</Text>
         <View style={{width: 28}} /> 
       </View>
 
-      <ScrollView style={styles.content}>
-        <View style={styles.imageContainer}>
-            <TouchableOpacity onPress={pickImage} style={styles.imageWrapper}>
-                {image ? <Image source={{ uri: image }} style={styles.medImage} /> : (
-                    <View style={styles.placeholderImage}><Ionicons name="camera" size={40} color="#0056b3" /><Text style={{color: '#0056b3'}}>เพิ่มรูปยา</Text></View>
-                )}
-            </TouchableOpacity>
-        </View>
+      {/* ✅ ครอบเฉพาะเนื้อหา */}
+      <KeyboardWrapper>
+        <View style={styles.content}>
+            <View style={styles.imageContainer}>
+                <TouchableOpacity onPress={pickImage} style={styles.imageWrapper}>
+                    {image ? <Image source={{ uri: image }} style={styles.medImage} /> : (
+                        <View style={styles.placeholderImage}><Ionicons name="camera" size={40} color="#0056b3" /><Text style={{color: '#0056b3'}}>เพิ่มรูปยา</Text></View>
+                    )}
+                </TouchableOpacity>
+            </View>
 
-        <Text style={styles.label}>ชื่อยา</Text>
-        <TextInput style={styles.input} placeholder="เช่น พาราเซตามอล" value={name} onChangeText={setName} />
+            <Text style={styles.label}>ชื่อยา</Text>
+            <TextInput style={styles.input} placeholder="เช่น พาราเซตามอล" value={name} onChangeText={setName} />
 
-        <Text style={styles.label}>กลุ่มโรค / อาการ</Text>
-        <View style={styles.diseaseContainer}>
-            <TextInput style={[styles.input, {marginBottom: 10}]} placeholder="พิมพ์ชื่อกลุ่มโรค หรือเลือกด้านล่าง" value={diseaseGroup} onChangeText={setDiseaseGroup} />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {existingGroups.map((group, index) => (
-                    <TouchableOpacity key={index} style={[styles.chip, diseaseGroup === group && styles.chipActive]} onPress={() => setDiseaseGroup(group)}>
-                        <Text style={[styles.chipText, diseaseGroup === group && styles.chipTextActive]}>{group}</Text>
+            <Text style={styles.label}>กลุ่มโรค / อาการ</Text>
+            <View style={styles.diseaseContainer}>
+                <TextInput style={[styles.input, {marginBottom: 10}]} placeholder="พิมพ์ชื่อกลุ่มโรค หรือเลือกด้านล่าง" value={diseaseGroup} onChangeText={setDiseaseGroup} />
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {existingGroups.map((group, index) => (
+                        <TouchableOpacity key={index} style={[styles.chip, diseaseGroup === group && styles.chipActive]} onPress={() => setDiseaseGroup(group)}>
+                            <Text style={[styles.chipText, diseaseGroup === group && styles.chipTextActive]}>{group}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+            </View>
+
+            <Text style={styles.label}>ประเภทของยา</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                {['tablet', 'capsule', 'liquid', 'injection', 'external', 'spray', 'powder', 'other'].map((type) => (
+                    <TouchableOpacity 
+                        key={type} 
+                        style={[styles.chip, drugType === type && styles.chipActive]} 
+                        onPress={() => {
+                            setDrugType(type);
+                            if (type === 'tablet') setUnit('เม็ด');
+                            else if (type === 'capsule') setUnit('แคปซูล');
+                            else if (type === 'liquid') setUnit('มล.');
+                            else if (type === 'injection') setUnit('เข็ม');
+                        }}
+                    >
+                        <Text style={[styles.chipText, drugType === type && styles.chipTextActive]}>{getDrugTypeText(type)}</Text>
                     </TouchableOpacity>
                 ))}
             </ScrollView>
-        </View>
 
-        <Text style={styles.label}>ประเภทของยา</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-            {['tablet', 'capsule', 'liquid', 'injection', 'external', 'spray', 'powder', 'other'].map((type) => (
-                <TouchableOpacity 
-                    key={type} 
-                    style={[styles.chip, drugType === type && styles.chipActive]} 
-                    onPress={() => {
-                        setDrugType(type);
-                        if (type === 'tablet') setUnit('เม็ด');
-                        else if (type === 'capsule') setUnit('แคปซูล');
-                        else if (type === 'liquid') setUnit('มล.');
-                        else if (type === 'injection') setUnit('เข็ม');
-                    }}
-                >
-                    <Text style={[styles.chipText, drugType === type && styles.chipTextActive]}>{getDrugTypeText(type)}</Text>
-                </TouchableOpacity>
-            ))}
-        </ScrollView>
+            <Text style={styles.label}>คำแนะนำ</Text>
+            <TextInput style={styles.input} placeholder="เช่น เคี้ยวให้ละเอียด" value={instruction} onChangeText={setInstruction} />
 
-        <Text style={styles.label}>คำแนะนำ</Text>
-        <TextInput style={styles.input} placeholder="เช่น เคี้ยวให้ละเอียด" value={instruction} onChangeText={setInstruction} />
-
-        <Text style={styles.label}>ช่วงเวลาที่ทาน</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-            {['before_meal', 'after_meal', 'bedtime', 'empty_stomach', 'as_needed'].map((type) => (
-                <TouchableOpacity key={type} style={[styles.chip, intakeTiming === type && styles.chipActive]} onPress={() => setIntakeTiming(type)}>
-                    <Text style={[styles.chipText, intakeTiming === type && styles.chipTextActive]}>{getIntakeText(type)}</Text>
-                </TouchableOpacity>
-            ))}
-        </ScrollView>
-
-        <Text style={[styles.sectionHeader, {marginTop: 20}]}>ตั้งเวลาแจ้งเตือน</Text>
-        <View style={styles.tabContainer}>
-            <TouchableOpacity style={[styles.tab, scheduleType === 'specific' && styles.tabActive]} onPress={() => setScheduleType('specific')}>
-                <Text style={scheduleType === 'specific' ? styles.tabTextActive : styles.tabText}>ระบุเวลาเอง</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.tab, scheduleType === 'interval' && styles.tabActive]} onPress={() => setScheduleType('interval')}>
-                <Text style={scheduleType === 'interval' ? styles.tabTextActive : styles.tabText}>ทุกๆ X ชั่วโมง</Text>
-            </TouchableOpacity>
-        </View>
-
-        {scheduleType === 'specific' ? (
-            <View>
-                {timeList.map((item, index) => (
-                    <View key={item.id} style={styles.timeRow}>
-                        <Text style={{width: 30}}>{index + 1}.</Text>
-                        <TouchableOpacity style={styles.timeInput} onPress={() => openTimePicker(item.id, item.date)}>
-                            <Text style={styles.inputText}>{formatTime(item.date)} น.</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => removeTimeRow(item.id)} style={styles.removeBtn}><Ionicons name="trash-outline" size={24} color="red" /></TouchableOpacity>
-                    </View>
+            <Text style={styles.label}>ช่วงเวลาที่ทาน</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                {['before_meal', 'after_meal', 'bedtime', 'empty_stomach', 'as_needed'].map((type) => (
+                    <TouchableOpacity key={type} style={[styles.chip, intakeTiming === type && styles.chipActive]} onPress={() => setIntakeTiming(type)}>
+                        <Text style={[styles.chipText, intakeTiming === type && styles.chipTextActive]}>{getIntakeText(type)}</Text>
+                    </TouchableOpacity>
                 ))}
-                <TouchableOpacity style={styles.addTimeBtn} onPress={addTimeRow}><Text style={{color: '#0056b3'}}>+ เพิ่มเวลา</Text></TouchableOpacity>
+            </ScrollView>
+
+            <Text style={[styles.sectionHeader, {marginTop: 20}]}>ตั้งเวลาแจ้งเตือน</Text>
+            <View style={styles.tabContainer}>
+                <TouchableOpacity style={[styles.tab, scheduleType === 'specific' && styles.tabActive]} onPress={() => setScheduleType('specific')}>
+                    <Text style={scheduleType === 'specific' ? styles.tabTextActive : styles.tabText}>ระบุเวลาเอง</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.tab, scheduleType === 'interval' && styles.tabActive]} onPress={() => setScheduleType('interval')}>
+                    <Text style={scheduleType === 'interval' ? styles.tabTextActive : styles.tabText}>ทุกๆ X ชั่วโมง</Text>
+                </TouchableOpacity>
             </View>
-        ) : (
-            <View style={styles.intervalBox}>
-                <View style={styles.row}>
-                    <View style={{flex:1}}><Text>เริ่มทาน</Text><TouchableOpacity style={styles.timeInput} onPress={() => openTimePicker(null, startTime)}><Text>{formatTime(startTime)}</Text></TouchableOpacity></View>
-                    <View style={{flex:1}}><Text>ทุกๆ (ชม.)</Text><TextInput style={styles.input} keyboardType="numeric" value={intervalHours} onChangeText={setIntervalHours} /></View>
+
+            {scheduleType === 'specific' ? (
+                <View>
+                    {timeList.map((item, index) => (
+                        <View key={item.id} style={styles.timeRow}>
+                            <Text style={{width: 30}}>{index + 1}.</Text>
+                            <TouchableOpacity style={styles.timeInput} onPress={() => openTimePicker(item.id, item.date)}>
+                                <Text style={styles.inputText}>{formatTime(item.date)} น.</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => removeTimeRow(item.id)} style={styles.removeBtn}><Ionicons name="trash-outline" size={24} color="red" /></TouchableOpacity>
+                        </View>
+                    ))}
+                    <TouchableOpacity style={styles.addTimeBtn} onPress={addTimeRow}><Text style={{color: '#0056b3'}}>+ เพิ่มเวลา</Text></TouchableOpacity>
+                </View>
+            ) : (
+                <View style={styles.intervalBox}>
+                    <View style={styles.row}>
+                        <View style={{flex:1}}><Text>เริ่มทาน</Text><TouchableOpacity style={styles.timeInput} onPress={() => openTimePicker(null, startTime)}><Text>{formatTime(startTime)}</Text></TouchableOpacity></View>
+                        <View style={{flex:1}}><Text>ทุกๆ (ชม.)</Text><TextInput style={styles.input} keyboardType="numeric" value={intervalHours} onChangeText={setIntervalHours} /></View>
+                    </View>
+                </View>
+            )}
+
+            <View style={styles.divider} />
+            
+            <View style={styles.row}>
+                <View style={{flex: 1, marginRight: 10}}>
+                    <Text style={styles.label}>ทานครั้งละ (Dosage)</Text>
+                    <TextInput 
+                        style={[styles.input, {textAlign: 'center', fontWeight: 'bold'}]} 
+                        value={dosageAmount} 
+                        keyboardType="numeric" 
+                        onChangeText={setDosageAmount} 
+                        placeholder="1"
+                    />
+                </View>
+                <View style={{flex: 1}}>
+                    <Text style={styles.label}>หน่วยนับ</Text>
+                    <TextInput style={styles.input} value={unit} onChangeText={setUnit} />
                 </View>
             </View>
-        )}
 
-        <View style={styles.divider} />
-        
-        {/* ✅✅✅ ส่วนที่เพิ่มใหม่: ข้อมูลปริมาณการทาน และ สต็อก ✅✅✅ */}
-        <View style={styles.row}>
-            <View style={{flex: 1, marginRight: 10}}>
-                <Text style={styles.label}>ทานครั้งละ (Dosage)</Text>
-                <TextInput 
-                    style={[styles.input, {textAlign: 'center', fontWeight: 'bold'}]} 
-                    value={dosageAmount} 
-                    keyboardType="numeric" 
-                    onChangeText={setDosageAmount} 
-                    placeholder="1"
-                />
+            <View style={styles.row}>
+                <View style={{flex: 1, marginRight: 10}}>
+                    <Text style={styles.label}>จำนวนในคลัง (Stock)</Text>
+                    <TextInput style={styles.input} value={quantity} keyboardType="numeric" onChangeText={setQuantity} placeholder="จำนวนทั้งหมด" />
+                </View>
+                <View style={{flex: 1}}>
+                    <Text style={styles.label}>เตือนเมื่อต่ำกว่า</Text>
+                    <TextInput style={styles.input} value={notifyThreshold} keyboardType="numeric" onChangeText={setNotifyThreshold} placeholder="เช่น 5" />
+                </View>
             </View>
-            <View style={{flex: 1}}>
-                <Text style={styles.label}>หน่วยนับ</Text>
-                <TextInput style={styles.input} value={unit} onChangeText={setUnit} />
-            </View>
-        </View>
 
-        <View style={styles.row}>
-            <View style={{flex: 1, marginRight: 10}}>
-                <Text style={styles.label}>จำนวนในคลัง (Stock)</Text>
-                <TextInput style={styles.input} value={quantity} keyboardType="numeric" onChangeText={setQuantity} placeholder="จำนวนทั้งหมด" />
+            <Text style={[styles.label, {marginTop: 10}]}>ระยะเวลาทานยา</Text>
+            <View style={styles.tabContainer}>
+                <TouchableOpacity style={[styles.tab, durationMode === 'days' && styles.tabActive]} onPress={() => setDurationMode('days')}><Text>ระบุวัน</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.tab, durationMode === 'date' && styles.tabActive]} onPress={() => setDurationMode('date')}><Text>ถึงวันที่</Text></TouchableOpacity>
             </View>
-            <View style={{flex: 1}}>
-                <Text style={styles.label}>เตือนเมื่อต่ำกว่า</Text>
-                <TextInput style={styles.input} value={notifyThreshold} keyboardType="numeric" onChangeText={setNotifyThreshold} placeholder="เช่น 5" />
-            </View>
-        </View>
-        {/* ========================================================= */}
+            
+            {durationMode === 'days' ? (
+                <TextInput style={styles.input} keyboardType="numeric" value={durationDays} onChangeText={setDurationDays} placeholder="จำนวนวัน" />
+            ) : (
+                <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowEndDatePicker(true)}>
+                    <Text style={styles.inputText}>{endDate.toLocaleDateString('th-TH')}</Text>
+                </TouchableOpacity>
+            )}
 
-        <Text style={[styles.label, {marginTop: 10}]}>ระยะเวลาทานยา</Text>
-        <View style={styles.tabContainer}>
-            <TouchableOpacity style={[styles.tab, durationMode === 'days' && styles.tabActive]} onPress={() => setDurationMode('days')}><Text>ระบุวัน</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.tab, durationMode === 'date' && styles.tabActive]} onPress={() => setDurationMode('date')}><Text>ถึงวันที่</Text></TouchableOpacity>
-        </View>
-        
-        {durationMode === 'days' ? (
-            <TextInput style={styles.input} keyboardType="numeric" value={durationDays} onChangeText={setDurationDays} placeholder="จำนวนวัน" />
-        ) : (
-            <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowEndDatePicker(true)}>
-                <Text style={styles.inputText}>{endDate.toLocaleDateString('th-TH')}</Text>
+            {showTimePicker && (
+                Platform.OS === 'ios' ? (
+                    <Modal transparent={true} animationType="fade">
+                        <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalHeader}>
+                                    <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                                        <Text style={{color: 'red', fontSize: 16}}>ยกเลิก</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={confirmIOSTime}>
+                                        <Text style={{color: '#0056b3', fontSize: 16, fontWeight: 'bold'}}>ตกลง</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <DateTimePicker 
+                                    value={tempDate} 
+                                    mode="time" 
+                                    display="spinner" 
+                                    is24Hour={true} 
+                                    onChange={(e, d) => setTempDate(d || tempDate)} 
+                                    style={{height: 200}}
+                                />
+                            </View>
+                        </View>
+                    </Modal>
+                ) : (
+                    <DateTimePicker value={tempDate} mode="time" display="default" is24Hour={true} onChange={onTimeSelectedAndroid} />
+                )
+            )}
+
+            {showEndDatePicker && (
+                Platform.OS === 'ios' ? (
+                    <Modal transparent={true} animationType="fade">
+                        <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalHeader}>
+                                    <TouchableOpacity onPress={() => setShowEndDatePicker(false)}>
+                                        <Text style={{color: 'red', fontSize: 16}}>ยกเลิก</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={confirmIOSDate}>
+                                        <Text style={{color: '#0056b3', fontSize: 16, fontWeight: 'bold'}}>ตกลง</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <DateTimePicker value={endDate} mode="date" display="spinner" onChange={(e, d) => setEndDate(d || endDate)} style={{height: 200}} />
+                            </View>
+                        </View>
+                    </Modal>
+                ) : (
+                    <DateTimePicker value={endDate} mode="date" onChange={onDateSelectedAndroid} />
+                )
+            )}
+
+            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>บันทึกข้อมูล</Text>}
             </TouchableOpacity>
-        )}
-
-        {/* MODALs สำหรับ iOS */}
-        {showTimePicker && (
-            Platform.OS === 'ios' ? (
-                <Modal transparent={true} animationType="fade">
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalHeader}>
-                                <TouchableOpacity onPress={() => setShowTimePicker(false)}>
-                                    <Text style={{color: 'red', fontSize: 16}}>ยกเลิก</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={confirmIOSTime}>
-                                    <Text style={{color: '#0056b3', fontSize: 16, fontWeight: 'bold'}}>ตกลง</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <DateTimePicker 
-                                value={tempDate} 
-                                mode="time" 
-                                display="spinner" 
-                                is24Hour={true} 
-                                onChange={(e, d) => setTempDate(d || tempDate)} 
-                                style={{height: 200}}
-                            />
-                        </View>
-                    </View>
-                </Modal>
-            ) : (
-                <DateTimePicker value={tempDate} mode="time" display="default" is24Hour={true} onChange={onTimeSelectedAndroid} />
-            )
-        )}
-
-        {showEndDatePicker && (
-            Platform.OS === 'ios' ? (
-                <Modal transparent={true} animationType="fade">
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalHeader}>
-                                <TouchableOpacity onPress={() => setShowEndDatePicker(false)}>
-                                    <Text style={{color: 'red', fontSize: 16}}>ยกเลิก</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={confirmIOSDate}>
-                                    <Text style={{color: '#0056b3', fontSize: 16, fontWeight: 'bold'}}>ตกลง</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <DateTimePicker value={endDate} mode="date" display="spinner" onChange={(e, d) => setEndDate(d || endDate)} style={{height: 200}} />
-                        </View>
-                    </View>
-                </Modal>
-            ) : (
-                <DateTimePicker value={endDate} mode="date" onChange={onDateSelectedAndroid} />
-            )
-        )}
-
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>บันทึกข้อมูล</Text>}
-        </TouchableOpacity>
-        <View style={{height: 50}} />
-      </ScrollView>
+            <View style={{height: 50}} />
+        </View>
+      </KeyboardWrapper>
     </View>
   );
 }

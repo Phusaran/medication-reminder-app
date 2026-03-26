@@ -2,52 +2,34 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
-// ✅ Import Config
 import { API_URL } from '../constants/config';
 import NetInfo from '@react-native-community/netinfo';
 import { addSymptomToQueue } from '../utils/offlineQueue';
+// ✅ Import KeyboardWrapper
+import KeyboardWrapper from '../components/KeyboardWrapper';
 
 export default function AddSymptomScreen({ route, navigation }) {
   const user = route.params?.user || { id: 0 };
-
   const [symptomName, setSymptomName] = useState('');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState(1);
 
-const handleSave = async () => {
-    if (!symptomName) {
-      Alert.alert('แจ้งเตือน', 'กรุณาระบุชื่ออาการ');
-      return;
-    }
-
-    // จัดเตรียมข้อมูล
-    const payload = {
-        user_id: user.id,
-        symptom_name: symptomName,
-        description: description,
-        severity: severity
-    };
+  const handleSave = async () => {
+    if (!symptomName) { Alert.alert('แจ้งเตือน', 'กรุณาระบุชื่ออาการ'); return; }
+    const payload = { user_id: user.id, symptom_name: symptomName, description: description, severity: severity };
 
     try {
       const state = await NetInfo.fetch();
-      
       if (state.isConnected) {
-          // ✅ มีเน็ต: บันทึกลงฐานข้อมูลปกติ
           const response = await axios.post(`${API_URL}/symptoms`, payload);
-          if (response.status === 201) {
-            Alert.alert("สำเร็จ", "บันทึกอาการเรียบร้อยแล้ว");
-          }
+          if (response.status === 201) Alert.alert("สำเร็จ", "บันทึกอาการเรียบร้อยแล้ว");
       } else {
-          // ❌ ไม่มีเน็ต: เอาลงคิว
           await addSymptomToQueue(payload);
           Alert.alert("โหมดออฟไลน์", "บันทึกอาการป่วยลงเครื่องแล้ว ระบบจะส่งข้อมูลเมื่อมีอินเทอร์เน็ต");
       }
-      
-      navigation.goBack(); // ปิดหน้าต่างกลับไปหน้า Home
-
+      navigation.goBack();
     } catch (error) {
       console.log(error);
-      // กรณีเน็ตหลุดกลางคัน
       await addSymptomToQueue(payload);
       Alert.alert("โหมดออฟไลน์", "เครือข่ายมีปัญหา บันทึกข้อมูลลงเครื่องแล้ว");
       navigation.goBack();
@@ -64,63 +46,43 @@ const handleSave = async () => {
         <View style={{width: 30}} />
       </View>
 
-      <View style={styles.content}>
-        <Text style={styles.label}>ชื่ออาการ</Text>
-        <TextInput 
-            style={styles.input} 
-            placeholder="เช่น ปวดหัว, ตัวร้อน" 
-            value={symptomName} 
-            onChangeText={setSymptomName} 
-        />
+      {/* ✅ ครอบเฉพาะเนื้อหา */}
+      <KeyboardWrapper>
+        <View style={styles.content}>
+          <Text style={styles.label}>ชื่ออาการ</Text>
+          <TextInput style={styles.input} placeholder="เช่น ปวดหัว, ตัวร้อน" value={symptomName} onChangeText={setSymptomName} />
 
-        <Text style={styles.label}>รายละเอียดเพิ่มเติม</Text>
-        <TextInput 
-            style={[styles.input, {height: 80}]} 
-            placeholder="อธิบายลักษณะอาการ..." 
-            multiline 
-            value={description} 
-            onChangeText={setDescription} 
-        />
+          <Text style={styles.label}>รายละเอียดเพิ่มเติม</Text>
+          <TextInput style={[styles.input, {height: 80}]} placeholder="อธิบายลักษณะอาการ..." multiline value={description} onChangeText={setDescription} />
 
-        <Text style={styles.label}>ระดับความรุนแรง (1-5)</Text>
-        <View style={styles.severityContainer}>
-            {[1, 2, 3, 4, 5].map((level) => (
-                <TouchableOpacity 
-                    key={level} 
-                    style={[
-                        styles.severityButton, 
-                        severity === level && { backgroundColor: '#d32f2f', borderColor: '#d32f2f' }
-                    ]}
-                    onPress={() => setSeverity(level)}
-                >
-                    <Text style={[
-                        { fontSize: 18, fontWeight: 'bold', color: '#333' },
-                        severity === level && { color: '#fff' }
-                    ]}>
-                        {level}
-                    </Text>
-                </TouchableOpacity>
-            ))}
+          <Text style={styles.label}>ระดับความรุนแรง (1-5)</Text>
+          <View style={styles.severityContainer}>
+              {[1, 2, 3, 4, 5].map((level) => (
+                  <TouchableOpacity 
+                      key={level} 
+                      style={[styles.severityButton, severity === level && { backgroundColor: '#d32f2f', borderColor: '#d32f2f' }]}
+                      onPress={() => setSeverity(level)}
+                  >
+                      <Text style={[{ fontSize: 18, fontWeight: 'bold', color: '#333' }, severity === level && { color: '#fff' }]}>{level}</Text>
+                  </TouchableOpacity>
+              ))}
+          </View>
+          <Text style={{textAlign: 'center', color: '#666', marginBottom: 30}}>
+              {severity === 1 ? 'เล็กน้อย' : severity === 5 ? 'รุนแรงมาก' : 'ปานกลาง'}
+          </Text>
+
+          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+              <Text style={styles.saveButtonText}>บันทึก</Text>
+          </TouchableOpacity>
         </View>
-        <Text style={{textAlign: 'center', color: '#666', marginBottom: 30}}>
-            {severity === 1 ? 'เล็กน้อย' : severity === 5 ? 'รุนแรงมาก' : 'ปานกลาง'}
-        </Text>
-
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <Text style={styles.saveButtonText}>บันทึก</Text>
-        </TouchableOpacity>
-      </View>
+      </KeyboardWrapper>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: { 
-    paddingTop: 50, paddingBottom: 15, paddingHorizontal: 20, 
-    borderBottomWidth: 1, borderBottomColor: '#eee', 
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'
-  },
+  header: { paddingTop: 50, paddingBottom: 15, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   backButton: { padding: 5 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   content: { padding: 20 },

@@ -527,7 +527,33 @@ app.get('/api/symptoms/:userId', async (req, res) => {
 // ==========================================
 // 5. ส่วนผู้ดูแล (Caregiver)
 // ==========================================
+// ✅ เพิ่ม API สมัครสมาชิกผู้ดูแล
+app.post('/api/caregiver/register', async (req, res) => {
+    const { email, password, firstname, lastname } = req.body;
+    
+    if (!email || !password || !firstname || !lastname) {
+        return res.status(400).json({ message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
+    }
+    
+    try {
+        const [existingCaregiver] = await db.query('SELECT * FROM Caregiver WHERE email = ?', [email]); 
+        if (existingCaregiver.length > 0) {
+            return res.status(400).json({ message: 'อีเมลนี้ถูกใช้งานแล้วในระบบผู้ดูแล' });
+        }
 
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        await db.query(
+            'INSERT INTO Caregiver (email, password, firstname, lastname) VALUES (?, ?, ?, ?)',
+            [email, hashedPassword, firstname, lastname]
+        );
+        res.status(201).json({ message: 'สมัครสมาชิกผู้ดูแลเรียบร้อยแล้ว' });
+    } catch (error) {
+        console.error("Caregiver Register Error:", error);
+        res.status(500).json({ message: 'เกิดข้อผิดพลาดในการสมัครสมาชิกผู้ดูแล' });
+    }
+});
 app.post('/api/caregiver/login', async (req, res) => {
     const { email, password } = req.body;
     try {

@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, Image, ActivityIndicator } from 'react-native';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-// ✅ Import Config
 import { API_URL } from '../constants/config';
+// ✅ Import KeyboardWrapper
+import KeyboardWrapper from '../components/KeyboardWrapper';
 
 export default function EditProfileScreen({ route, navigation }) {
   const { user } = route.params;
-  
   const [firstname, setFirstname] = useState(user.firstname);
   const [lastname, setLastname] = useState(user.lastname);
   const [password, setPassword] = useState('');
@@ -19,37 +19,28 @@ export default function EditProfileScreen({ route, navigation }) {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { Alert.alert('ขออภัย', 'ต้องการสิทธิ์เข้าถึงรูปภาพ'); return; }
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.5,
-    });
+    let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.5 });
     if (!result.canceled) { setImage(result.assets[0].uri); setNewImageSelected(true); }
   };
 
   const handleSave = async () => {
     if (!firstname || !lastname) { Alert.alert('แจ้งเตือน', 'กรุณาระบุชื่อและนามสกุล'); return; }
-
     setLoading(true);
     try {
         let finalImageUrl = image;
-
         if (newImageSelected) {
             const formData = new FormData();
             formData.append('profileImage', { uri: image, name: 'profile.jpg', type: 'image/jpeg' });
-            // ✅ แก้ Path: /upload
             const uploadRes = await axios.post(`${API_URL}/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
             if (uploadRes.status === 200) finalImageUrl = uploadRes.data.url;
         }
 
         const payload = { firstname, lastname, password: password || undefined, profile_image: finalImageUrl };
-
-        // ✅ แก้ Path: /users/${user.id}
         const response = await axios.put(`${API_URL}/users/${user.id}`, payload);
 
         if (response.status === 200) {
             const updatedUser = { ...response.data, id: response.data.user_id };
-            Alert.alert("สำเร็จ", "บันทึกข้อมูลเรียบร้อยแล้ว", [
-                { text: "ตกลง", onPress: () => navigation.navigate('Home', { user: updatedUser }) } 
-            ]);
+            Alert.alert("สำเร็จ", "บันทึกข้อมูลเรียบร้อยแล้ว", [{ text: "ตกลง", onPress: () => navigation.navigate('Home', { user: updatedUser }) }]);
         }
     } catch (error) { console.log(error); Alert.alert("ผิดพลาด", "ไม่สามารถบันทึกข้อมูลได้"); } 
     finally { setLoading(false); }
@@ -63,29 +54,32 @@ export default function EditProfileScreen({ route, navigation }) {
         <View style={{width: 28}} />
       </View>
 
-      <ScrollView style={styles.content}>
-        <View style={styles.avatarContainer}>
-            <TouchableOpacity onPress={pickImage} style={styles.avatarWrapper}>
-                {image ? (<Image source={{ uri: image }} style={styles.avatarImage} />) : (<View style={[styles.avatarImage, styles.placeholderAvatar]}><Ionicons name="person" size={60} color="#fff" /></View>)}
-                <View style={styles.cameraIcon}><Ionicons name="camera" size={20} color="#fff" /></View>
-            </TouchableOpacity>
-            <Text style={styles.changePhotoText}>แตะเพื่อเปลี่ยนรูป</Text>
-            <Text style={styles.emailText}>{user.email}</Text>
-        </View>
+      {/* ✅ ครอบเฉพาะเนื้อหา เปลี่ยน ScrollView เป็น View ธรรมดา */}
+      <KeyboardWrapper>
+        <View style={styles.content}>
+          <View style={styles.avatarContainer}>
+              <TouchableOpacity onPress={pickImage} style={styles.avatarWrapper}>
+                  {image ? (<Image source={{ uri: image }} style={styles.avatarImage} />) : (<View style={[styles.avatarImage, styles.placeholderAvatar]}><Ionicons name="person" size={60} color="#fff" /></View>)}
+                  <View style={styles.cameraIcon}><Ionicons name="camera" size={20} color="#fff" /></View>
+              </TouchableOpacity>
+              <Text style={styles.changePhotoText}>แตะเพื่อเปลี่ยนรูป</Text>
+              <Text style={styles.emailText}>{user.email}</Text>
+          </View>
 
-        <View style={styles.form}>
-            <Text style={styles.label}>ชื่อจริง</Text>
-            <TextInput style={styles.input} value={firstname} onChangeText={setFirstname} />
-            <Text style={styles.label}>นามสกุล</Text>
-            <TextInput style={styles.input} value={lastname} onChangeText={setLastname} />
-            <Text style={styles.label}>เปลี่ยนรหัสผ่าน</Text>
-            <TextInput style={styles.input} placeholder="ระบุรหัสผ่านใหม่ (ถ้าต้องการ)" secureTextEntry value={password} onChangeText={setPassword} />
+          <View style={styles.form}>
+              <Text style={styles.label}>ชื่อจริง</Text>
+              <TextInput style={styles.input} value={firstname} onChangeText={setFirstname} />
+              <Text style={styles.label}>นามสกุล</Text>
+              <TextInput style={styles.input} value={lastname} onChangeText={setLastname} />
+              <Text style={styles.label}>เปลี่ยนรหัสผ่าน</Text>
+              <TextInput style={styles.input} placeholder="ระบุรหัสผ่านใหม่ (ถ้าต้องการ)" secureTextEntry value={password} onChangeText={setPassword} />
 
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
-                {loading ? (<ActivityIndicator color="#fff" />) : (<Text style={styles.saveBtnText}>บันทึกการเปลี่ยนแปลง</Text>)}
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={loading}>
+                  {loading ? (<ActivityIndicator color="#fff" />) : (<Text style={styles.saveBtnText}>บันทึกการเปลี่ยนแปลง</Text>)}
+              </TouchableOpacity>
+          </View>
         </View>
-      </ScrollView>
+      </KeyboardWrapper>
     </View>
   );
 }

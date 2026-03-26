@@ -164,14 +164,21 @@ export default function HomeScreen({ route, navigation }) {
         </View>
       )}
       
+      {/* ✅ ปรับปรุงส่วน Header ให้มีปุ่มกลับ หาก caregiver เป็นคนเปิด */}
       <View style={styles.header}>
-        <View>
-            <Text style={styles.greeting}>สวัสดี, คุณ{user.firstname}</Text>
-            <Text style={styles.subGreeting}>{currentDate}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {caregiver && (
+                <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 15 }}>
+                    <Ionicons name="arrow-back" size={28} color="#fff" />
+                </TouchableOpacity>
+            )}
+            <View>
+                <Text style={styles.greeting}>สวัสดี, คุณ{user.firstname}</Text>
+                <Text style={styles.subGreeting}>{currentDate}</Text>
+            </View>
         </View>
       </View>
 
-      {/* ✅ ปุ่มบันทึกอาการป่วย: กลับมาไว้ที่เดิม (actionContainer) */}
       <View style={styles.actionContainer}>
         <TouchableOpacity 
             style={styles.actionButton} 
@@ -223,7 +230,6 @@ export default function HomeScreen({ route, navigation }) {
             />
         )}
       </View>
-      {/* ลบ FAB ปุ่มเพิ่มยาขวาล่างออกแล้ว */}
     </View>
   );
 }
@@ -236,7 +242,6 @@ const styles = StyleSheet.create({
   greeting: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
   subGreeting: { color: '#d1e3ff', fontSize: 14, marginTop: 4 },
   
-  // ✅ Styles สำหรับปุ่มบันทึกอาการป่วยที่ตำแหน่งเดิม
   actionContainer: { marginTop: -20, paddingHorizontal: 20, flexDirection: 'row', justifyContent: 'center', marginBottom: 10 },
   actionButton: { flexDirection: 'row', backgroundColor: '#fff', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 25, alignItems: 'center', elevation: 5 },
   actionText: { marginLeft: 8, fontWeight: 'bold', color: '#333' },

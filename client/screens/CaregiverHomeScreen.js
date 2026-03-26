@@ -18,7 +18,6 @@ export default function CaregiverHomeScreen({ route, navigation }) {
 
   const fetchPatients = async () => {
     try {
-      // ✅ แก้ Path: /caregiver/patients/${caregiver.caregiver_id}
       const response = await axios.get(`${API_URL}/caregiver/patients/${caregiver.caregiver_id}`);
       setPatients(response.data);
     } catch (error) { console.log(error); }
@@ -74,7 +73,7 @@ export default function CaregiverHomeScreen({ route, navigation }) {
         keyExtractor={item => item.id.toString()}
         renderItem={renderPatientItem}
         ListEmptyComponent={<Text style={styles.empty}>ยังไม่มีผู้ป่วยในการดูแล</Text>}
-        contentContainerStyle={{ padding: 20 }}
+        contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
       />
 
       <TouchableOpacity style={styles.fab} onPress={() => navigation.navigate('Scan', { caregiverId: caregiver.caregiver_id })}>
