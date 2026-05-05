@@ -69,13 +69,15 @@ export default function StatisticsScreen({ route, navigation }) {
 
         const dailyCounts = last7Days.map(date => {
             const dayLogs = rawData.filter(item => item.taken_at.startsWith(date));
-            const taken = dayLogs.filter(item => item.status === 'taken').length;
+            // ✅ นับยอดรวมทั้งคนที่กินตรงเวลาและล่าช้าให้ไปแสดงในกราฟแท่ง
+            const taken = dayLogs.filter(item => item.status === 'taken' || item.status === 'late').length;
             return taken;
         });
 
-        // 2. เตรียมข้อมูล Pie Chart (สรุปสัดส่วนทั้งหมด)
+        // 2. เตรียมข้อมูล Pie Chart (แยกสัดส่วน 3 สถานะ)
         const totalTaken = rawData.filter(item => item.status === 'taken').length;
-        const totalSkipped = rawData.filter(item => item.status === 'skipped').length;
+        const totalLate = rawData.filter(item => item.status === 'late').length;
+        const totalMissed = rawData.filter(item => item.status === 'missed' || item.status === 'skipped').length; // รองรับข้อมูลเก่าที่เป็น skipped ด้วย
 
         setStats({
             barData: {
@@ -83,8 +85,9 @@ export default function StatisticsScreen({ route, navigation }) {
                 datasets: [{ data: dailyCounts }]
             },
             pieData: [
-                { name: "ทานแล้ว", population: totalTaken, color: "#4caf50", legendFontColor: "#7F7F7F", legendFontSize: 12 },
-                { name: "ข้าม/ลืม", population: totalSkipped, color: "#f44336", legendFontColor: "#7F7F7F", legendFontSize: 12 },
+                { name: "ตรงเวลา", population: totalTaken, color: "#4caf50", legendFontColor: "#7F7F7F", legendFontSize: 12 },
+                { name: "ล่าช้า", population: totalLate, color: "#ff9800", legendFontColor: "#7F7F7F", legendFontSize: 12 },
+                { name: "ข้าม/ลืม", population: totalMissed, color: "#f44336", legendFontColor: "#7F7F7F", legendFontSize: 12 },
             ]
         });
     };

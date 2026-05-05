@@ -45,11 +45,9 @@ export default function LoginScreen({ navigation }) {
     // ✅ เอา KeyboardWrapper ครอบนอกสุดแทน View
     <KeyboardWrapper>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3063/3063822.png' }} style={styles.logo} />
-          <Text style={styles.headerText}>CARE U</Text>
-        </View>
-
+              <View style={styles.header}>
+                  <Image source={require('../assets/icon/icon1.png')} style={styles.logo} />
+              </View>
         <View style={styles.formContainer}>
           <View style={styles.toggleContainer}>
               {['user', 'caregiver', 'admin'].map((r) => (
@@ -75,17 +73,17 @@ export default function LoginScreen({ navigation }) {
             <Text style={styles.buttonText}>เข้าสู่ระบบ</Text>
           </TouchableOpacity>
 
-          {role === 'user' && (
-              <View style={styles.registerContainer}>
-                  <TouchableOpacity 
-                    onPress={() => navigation.navigate('Register', { initialRole: role })} 
-                    style={styles.linkContainer}
-                  >
-                  <Text style={styles.linkText}>
-                    {role === 'user' ? 'ยังไม่มีบัญชีผู้ป่วย? สมัครสมาชิก' : 'ยังไม่มีบัญชีผู้ดูแล? สมัครสมาชิกผู้ดูแล'}
-                  </Text>
-                  </TouchableOpacity>
-              </View>
+          {(role === 'user' || role === 'caregiver') && (
+                 <View style={styles.registerContainer}>
+                      <TouchableOpacity
+                          onPress={() => navigation.navigate('Register', { initialRole: role })}
+                          style={styles.linkContainer}
+                      >
+                      <Text style={styles.linkText}>
+                      {role === 'user' ? 'ยังไม่มีบัญชีผู้ป่วย? สมัครสมาชิก' : 'ยังไม่มีบัญชีผู้ดูแล? สมัครสมาชิกผู้ดูแล'}
+                      </Text>
+                      </TouchableOpacity>
+                 </View>
           )}
         </View>
       </View>

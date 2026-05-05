@@ -163,7 +163,8 @@ app.get('/api/medications/:userId', async (req, res) => {
                 m.custom_image AS image_url, m.is_active, 
                 s.current_quantity,
                 sch.schedule_id, sch.time_to_take, sch.days_of_week, sch.dosage_amount,
-                MAX(CASE WHEN ml.med_log_id IS NOT NULL THEN 1 ELSE 0 END) AS is_taken
+                MAX(CASE WHEN ml.med_log_id IS NOT NULL THEN 1 ELSE 0 END) AS is_taken,
+                MAX(ml.status) AS log_status
             FROM User_Medication m
             JOIN Stock s ON m.user_med_id = s.user_med_id
             LEFT JOIN Schedule sch ON m.user_med_id = sch.user_med_id
@@ -422,7 +423,8 @@ app.post('/api/log-dose', async (req, res) => {
             [schedule_id, status]
         );
 
-        if (status === 'taken') {
+        // ✅ ถ้าตรงเวลา หรือ ล่าช้า ให้ตัดสต็อกยาตามปกติ
+        if (status === 'taken' || status === 'late') {
             const [scheduleRows] = await connection.query(
                 'SELECT dosage_amount, user_med_id FROM Schedule WHERE schedule_id = ?', 
                 [schedule_id]
@@ -458,6 +460,11 @@ app.post('/api/log-dose', async (req, res) => {
                 res.json({ message: 'บันทึกเรียบร้อย', alert: alertMessage }); 
                 return;
             }
+        } else if (status === 'missed') {
+            // ✅ กรณีเลยเวลา 1 ชม. (ข้ามมื้อยา) -> ไม่ต้องตัดสต็อก 
+            await connection.commit();
+            res.json({ message: 'บันทึกสถานะข้ามยาเรียบร้อย' });
+            return;
         }
         await connection.commit();
         res.json({ message: 'บันทึกเรียบร้อย' });

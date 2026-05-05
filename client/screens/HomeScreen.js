@@ -92,13 +92,34 @@ export default function HomeScreen({ route, navigation }) {
   }, [allMeds, sortBy]);
 
   const handleTakePill = async (item) => {
-    const payload = { user_med_id: item.user_med_id, schedule_id: item.schedule_id, status: 'taken' };
+    // ⏰ คำนวณเวลาเพื่อระบุสถานะ
+    const now = new Date();
+    let [hours, minutes] = (item.time_to_take || "00:00").split(':').map(Number);
+    const scheduledTime = new Date();
+    scheduledTime.setHours(hours, minutes, 0, 0);
+    
+    const diffMinutes = (now - scheduledTime) / (1000 * 60);
+    let computedStatus = 'taken';
+    
+    // เช็คความล่าช้า
+    if (diffMinutes > 60) {
+        computedStatus = 'missed'; // เกิน 60 นาที = ข้ามมื้อนี้
+    } else if (diffMinutes > 15) {
+        computedStatus = 'late'; // เกิน 15 นาที = ล่าช้า
+    }
+
+    const payload = { user_med_id: item.user_med_id, schedule_id: item.schedule_id, status: computedStatus };
+    
     try {
         const state = await NetInfo.fetch();
         if (state.isConnected) {
             const response = await axios.post(`${API_URL}/log-dose`, payload);
             if (response.data.message === 'วันนี้คุณบันทึกยานี้ไปแล้ว') {
-                Alert.alert("แจ้งเตือน", "ยานี้ถูกบันทึกไปแล้ว");
+                Alert.alert("แจ้งเตือน", "ยานี้ถูกบันทึกประวัติไปแล้ว");
+            } else if (computedStatus === 'missed') {
+                Alert.alert("เลยเวลาทานยา", "คุณเลยเวลาทานยาเกิน 1 ชั่วโมงแล้ว ให้ข้ามยามื้อนี้ไปเลย และรอทานมื้อต่อไปครับ");
+            } else if (computedStatus === 'late') {
+                Alert.alert("ทานยาล่าช้า", "บันทึกข้อมูลเรียบร้อย (คุณทานยาล่าช้ากว่ากำหนด)");
             } else if (response.data.alert) {
                  Alert.alert("แจ้งเตือน", response.data.alert);
             }
@@ -114,13 +135,33 @@ export default function HomeScreen({ route, navigation }) {
   };
 
   const renderItem = ({ item }) => {
+    // รองรับ log_status จาก Backend ถ้าไม่มีให้ใช้ is_taken เดิมเป็น Fallback
+    const logStatus = item.log_status || (item.is_taken === 1 ? 'taken' : null); 
     const isOutOfStock = item.current_quantity <= 0;
-    const isTaken = item.is_taken === 1;
+    
+    const isTaken = logStatus === 'taken';
+    const isLate = logStatus === 'late';
+    const isMissed = logStatus === 'missed';
+    const hasLogged = !!logStatus; 
+
     const now = new Date();
-    let [hours, minutes] = (item.time_to_take || "00:00").split(':').map(p => parseInt(p, 10));
+    let [hours, minutes] = (item.time_to_take || "00:00").split(':').map(Number);
     const scheduledTime = new Date();
     scheduledTime.setHours(hours, minutes, 0, 0);
-    const isNearTime = (scheduledTime - now) / (1000 * 60) <= 60; 
+    
+    const diffMinutes = (now - scheduledTime) / (1000 * 60);
+    const isNearTime = diffMinutes >= -60; // ให้อนุญาตกดได้ตั้งแต่ก่อนเวลา 1 ชม. เป็นต้นไป
+
+    // เช็คว่าปัจจุบันเลยเวลาเกิน 1 ชม. โดยที่ยังไม่เคยกดหรือไม่
+    const isCurrentlyOverdue = diffMinutes > 60 && !hasLogged;
+
+    // เตรียมข้อความสถานะ
+    let statusDisplay = null;
+    if (isTaken) statusDisplay = <Text style={{color: 'green', fontSize: 12, fontWeight: 'bold'}}>✅ ทานตรงเวลา</Text>;
+    else if (isLate) statusDisplay = <Text style={{color: '#ff9800', fontSize: 12, fontWeight: 'bold'}}>⚠️ ทานล่าช้า</Text>;
+    else if (isMissed) statusDisplay = <Text style={{color: 'red', fontSize: 12, fontWeight: 'bold'}}>❌ ข้ามมื้อนี้ (รอทานรอบต่อไป)</Text>;
+    else if (isCurrentlyOverdue) statusDisplay = <Text style={{color: 'red', fontSize: 12, fontWeight: 'bold'}}>⏰ เลยเวลา (กดเพื่อรับทราบการข้ามมื้อยา)</Text>;
+    else if (isOutOfStock) statusDisplay = <Text style={{color: 'red', fontSize: 12, fontWeight: 'bold'}}>⚠️ ยาหมด!</Text>;
 
     return (
       <View style={styles.card}>
@@ -133,18 +174,22 @@ export default function HomeScreen({ route, navigation }) {
               <Text style={styles.medName}>{item.custom_name}</Text>
               <Text style={styles.medDetail}>{item.dosage_amount} {item.dosage_unit} • {item.instruction}</Text>
               <Text style={styles.medTime}>เวลา: {item.time_to_take ? item.time_to_take.substring(0, 5) : '00:00'} น.</Text>
-              {isOutOfStock && <Text style={{color: 'red', fontSize: 12, fontWeight: 'bold'}}>⚠️ ยาหมด!</Text>}
-              {isTaken && <Text style={{color: 'green', fontSize: 12, fontWeight: 'bold'}}>✅ เรียบร้อยแล้ว</Text>}
+              {statusDisplay}
           </View>
         </View>
         <View style={styles.statusContainer}>
-           {isNearTime || isTaken || isOutOfStock ? (
+           {isNearTime || hasLogged || isOutOfStock ? (
                <TouchableOpacity 
-                   style={[styles.statusBtn, { backgroundColor: isTaken ? '#4caf50' : (isOutOfStock ? '#e0e0e0' : '#e3f2fd'), borderColor: isTaken ? '#4caf50' : '#bbdefb' }]} 
+                   style={[styles.statusBtn, { 
+                       backgroundColor: hasLogged ? (isMissed ? '#ffebee' : '#e8f5e9') : (isOutOfStock ? '#e0e0e0' : '#e3f2fd'), 
+                       borderColor: hasLogged ? (isMissed ? '#ef9a9a' : '#81c784') : '#bbdefb' 
+                   }]} 
                    onPress={() => handleTakePill(item)}
-                   disabled={isTaken || isOutOfStock} 
+                   disabled={hasLogged || isOutOfStock} 
                >
-                   <Text style={{fontSize: 18, color: isTaken ? '#fff' : '#000'}}>{isTaken ? '✓' : (isOutOfStock ? '❌' : '⬜')}</Text>
+                   <Text style={{fontSize: 18}}>
+                       {hasLogged ? (isMissed ? '❌' : '✓') : (isOutOfStock ? '❌' : '⬜')}
+                   </Text>
                </TouchableOpacity>
            ) : (
                <View style={styles.waitBadge}>

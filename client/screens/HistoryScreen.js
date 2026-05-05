@@ -60,7 +60,7 @@ export default function HistoryScreen({ route, navigation }) {
               }
               groups[monthKey].days[dayStr].items.push(item);
               groups[monthKey].days[dayStr].summary.total += 1;
-              if (item.status === 'taken') groups[monthKey].days[dayStr].summary.taken += 1;
+              if (item.status === 'taken' || item.status === 'late') groups[monthKey].days[dayStr].summary.taken += 1;
           });
 
           const sortedMonths = Object.values(groups).map(monthGroup => {
@@ -93,14 +93,10 @@ export default function HistoryScreen({ route, navigation }) {
   };
 
   const getStatusInfo = (item) => {
-      if (item.status === 'skipped') return { color: '#ef5350', label: 'ข้าม/ลืม', barColor: '#ffcdd2' };
-      const takenTime = new Date(item.taken_at);
-      const [h, m] = item.time_to_take.split(':');
-      const scheduledTime = new Date(item.taken_at);
-      scheduledTime.setHours(h, m, 0);
-      const diffMinutes = (takenTime - scheduledTime) / (1000 * 60);
-      if (diffMinutes > 30) return { color: '#ff9800', label: `ช้า ${Math.round(diffMinutes)} นาที`, barColor: '#ffe0b2' };
-      return { color: '#4caf50', label: 'ตรงเวลา', barColor: '#c8e6c9' };
+      if (item.status === 'taken') return { color: '#4caf50', label: 'ตรงเวลา', barColor: '#c8e6c9' };
+      if (item.status === 'late') return { color: '#ff9800', label: 'ล่าช้า', barColor: '#ffe0b2' };
+      if (item.status === 'missed') return { color: '#ef5350', label: 'ข้าม/ลืม', barColor: '#ffcdd2' };
+      return { color: '#9e9e9e', label: item.status, barColor: '#e0e0e0' }; // เผื่อกรณีอื่นๆ
   };
 
   const generatePDF = async () => {
@@ -142,7 +138,18 @@ export default function HistoryScreen({ route, navigation }) {
 
             if (item.type === 'med') {
                 icon = '💊'; name = item.custom_name; detail = `${item.dosage_amount} ${item.dosage_unit}`;
-                statusText = item.status === 'taken' ? 'ทานแล้ว' : 'ข้าม/ลืม'; statusColor = item.status === 'taken' ? '#2e7d32' : '#c62828'; rowBg = '#ffffff';
+                rowBg = '#ffffff';
+                
+                // นำลอจิก PDF มาใส่ตรงนี้
+                if (item.status === 'taken') {
+                    statusText = '✅ ทานตรงเวลา'; statusColor = '#2e7d32';
+                } else if (item.status === 'late') {
+                    statusText = '⚠️ ทานล่าช้า'; statusColor = '#f57c00';
+                } else if (item.status === 'missed') {
+                    statusText = '❌ ข้าม/ลืม'; statusColor = '#c62828';
+                } else {
+                    statusText = item.status; statusColor = '#333';
+                }
             } else {
                 icon = '🤒'; name = `<span style="color: #ef6c00;">อาการ: ${item.symptom_name}</span>`; detail = item.description || '-';
                 statusText = `ระดับ ${item.severity}`; statusColor = '#ef6c00'; rowBg = '#fff8e1';
