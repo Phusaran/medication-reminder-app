@@ -7,7 +7,6 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer'); 
 const path = require('path');
 const fs = require('fs');
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -21,7 +20,27 @@ if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir); 
 }
 app.use('/uploads', express.static(uploadDir));
-
+const autoMarkMissedMedications = async (userId) => {
+    try {
+        // อัปเดตตารางเป็น missed ทันที ถ้าเวลาปัจจุบันเลยเวลากินยาไปแล้ว 1 ชม. และยังไม่มี Log
+        const sql = `
+            INSERT INTO Medication_Log (schedule_id, status, taken_at)
+            SELECT s.schedule_id, 'missed', NOW()
+            FROM Schedule s
+            JOIN User_Medication um ON s.user_med_id = um.user_med_id
+            LEFT JOIN Medication_Log ml 
+                ON s.schedule_id = ml.schedule_id 
+                AND DATE(ml.taken_at) = CURDATE()
+            WHERE um.user_id = ?
+            AND (um.is_deleted = 0 OR um.is_deleted IS NULL)
+            AND ml.med_log_id IS NULL  
+            AND CURTIME() >= ADDTIME(s.time_to_take, '01:00:00')
+        `;
+        await db.query(sql, [userId]);
+    } catch (error) {
+        console.error("Error auto-marking missed meds:", error);
+    }
+};
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         cb(null, 'uploads/');
@@ -157,6 +176,7 @@ app.get('/api/medications/:userId', async (req, res) => {
     const { all } = req.query; 
 
     try {
+        await autoMarkMissedMedications(userId);
         let sql = `
             SELECT 
                 m.user_med_id, m.custom_name, m.instruction, m.dosage_unit, m.disease_group,
@@ -484,6 +504,7 @@ app.post('/api/log-dose', async (req, res) => {
 app.get('/api/history/:userId', async (req, res) => {
     const { userId } = req.params;
     try {
+        await autoMarkMissedMedications(userId);
         const [rows] = await db.query(`
             SELECT 
                 ml.med_log_id, ml.status, ml.taken_at,
