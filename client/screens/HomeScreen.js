@@ -7,6 +7,7 @@ import { API_URL } from '../constants/config';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { addDoseToQueue } from '../utils/offlineQueue';
+import * as Notifications from 'expo-notifications';
 
 export default function HomeScreen({ route, navigation }) {
   const user = route.params?.user || { id: 0, firstname: 'Guest' }; 
@@ -23,7 +24,29 @@ export default function HomeScreen({ route, navigation }) {
         if (user.id !== 0) fetchMedications();
     }, [user.id])
   );
+  const cleanupExpiredNotifications = async (activeMeds) => {
+    try {
+        // 1. ดึงรายการ ID ของยาที่ "ยังต้องกินอยู่" ทั้งหมดออกมา
+        const activeScheduleIds = activeMeds.map(med => med.schedule_id);
 
+        // 2. ไปดูคิวแจ้งเตือนทั้งหมดที่ฝังอยู่ในระบบ OS ของมือถือ
+        const scheduledNotifs = await Notifications.getAllScheduledNotificationsAsync();
+
+        // 3. วนลูปเช็คว่าการแจ้งเตือนไหนหมดอายุแล้ว (ไม่มีอยู่ใน activeScheduleIds) ให้ลบทิ้ง
+        for (const notif of scheduledNotifs) {
+            const data = notif.content.data;
+            const notifId = notif.identifier;
+
+            // ตรวจสอบว่าแจ้งเตือนนี้เป็นของระบบยาเราไหม และ scheduleId นี้หมดอายุหรือยัง
+            if (data && data.scheduleId && !activeScheduleIds.includes(data.scheduleId)) {
+                await Notifications.cancelScheduledNotificationAsync(notifId);
+                console.log(`🗑️ ยกเลิกแจ้งเตือนที่หมดอายุแล้ว: ${data.medName} (Schedule ID: ${data.scheduleId})`);
+            }
+        }
+    } catch (error) {
+        console.log("Cleanup Notifications Error:", error);
+    }
+  };
   const fetchMedications = async () => {
     try {
       const state = await NetInfo.fetch();
@@ -53,6 +76,8 @@ export default function HomeScreen({ route, navigation }) {
       }
       setAllMeds(uniqueData);
 
+      await cleanupExpiredNotifications(rawData);
+      
     } catch (error) { console.log("Fetch Error:", error); }
   };
 
