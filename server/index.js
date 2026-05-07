@@ -41,6 +41,20 @@ const autoMarkMissedMedications = async (userId) => {
         console.error("Error auto-marking missed meds:", error);
     }
 };
+const autoDeactivateExpiredMedications = async (userId) => {
+    try {
+        const sql = `
+            UPDATE User_Medication 
+            SET is_active = 0 
+            WHERE user_id = ? 
+            AND is_active = 1 
+            AND end_date < CURDATE()
+        `;
+        await db.query(sql, [userId]);
+    } catch (error) {
+        console.error("Error auto-deactivating expired meds:", error);
+    }
+};
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         cb(null, 'uploads/');
@@ -177,6 +191,7 @@ app.get('/api/medications/:userId', async (req, res) => {
 
     try {
         await autoMarkMissedMedications(userId);
+        await autoDeactivateExpiredMedications(userId);
         let sql = `
             SELECT 
                 m.user_med_id, m.custom_name, m.instruction, m.dosage_unit, m.disease_group,
