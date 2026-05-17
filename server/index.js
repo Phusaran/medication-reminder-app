@@ -4,67 +4,12 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const multer = require('multer'); 
+const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// ==========================================
-// ⚙️ ตั้งค่าระบบอัปโหลด (Multer) & โฟลเดอร์
-// ==========================================
-
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir); 
-}
-app.use('/uploads', express.static(uploadDir));
-const autoMarkMissedMedications = async (userId) => {
-    try {
-        // อัปเดตตารางเป็น missed ทันที ถ้าเวลาปัจจุบันเลยเวลากินยาไปแล้ว 1 ชม. และยังไม่มี Log
-        const sql = `
-            INSERT INTO Medication_Log (schedule_id, status, taken_at)
-            SELECT s.schedule_id, 'missed', NOW()
-            FROM Schedule s
-            JOIN User_Medication um ON s.user_med_id = um.user_med_id
-            LEFT JOIN Medication_Log ml 
-                ON s.schedule_id = ml.schedule_id 
-                AND DATE(ml.taken_at) = CURDATE()
-            WHERE um.user_id = ?
-            AND (um.is_deleted = 0 OR um.is_deleted IS NULL)
-            AND ml.med_log_id IS NULL  
-            AND CURTIME() >= ADDTIME(s.time_to_take, '01:00:00')
-        `;
-        await db.query(sql, [userId]);
-    } catch (error) {
-        console.error("Error auto-marking missed meds:", error);
-    }
-};
-const autoDeactivateExpiredMedications = async (userId) => {
-    try {
-        const sql = `
-            UPDATE User_Medication 
-            SET is_active = 0 
-            WHERE user_id = ? 
-            AND is_active = 1 
-            AND end_date < CURDATE()
-        `;
-        await db.query(sql, [userId]);
-    } catch (error) {
-        console.error("Error auto-deactivating expired meds:", error);
-    }
-};
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, 'uploads/');
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-});
-const upload = multer({ storage: storage });
 
 // ==========================================
 // 🗄️ ตั้งค่า Database
@@ -81,6 +26,119 @@ db.getConnection()
     .catch((err) => console.error('❌ Database connection failed:', err.message));
 
 // ==========================================
+// ⚙️ ตั้งค่าระบบอัปโหลด (Multer) & โฟลเดอร์
+// ==========================================
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
+}
+app.use('/uploads', express.static(uploadDir));
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/');
+    },
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage: storage });
+
+// ==========================================
+// 🔔 ระบบแจ้งเตือน (Notification Helper) 
+// ==========================================
+// ค้นหาผู้ดูแลและส่งแจ้งเตือนไปที่พวกเขาแทนผู้ป่วย
+const notifyCaregiver = async (userId, message) => {
+    try {
+        const [caregivers] = await db.query(`
+            SELECT cg.caregiver_id, cg.email, cg.device_token 
+            FROM Caring c
+            JOIN Caregiver cg ON c.caregiver_id = cg.caregiver_id
+            WHERE c.user_id = ? AND c.status = 'active'
+        `, [userId]);
+
+        if (caregivers.length > 0) {
+            for (let cg of caregivers) {
+                console.log(`🔔 [NOTIFY CAREGIVER] ส่งแจ้งเตือนไปที่ ${cg.email} (Token: ${cg.device_token})`);
+
+                // หากผู้ดูแลมี Token ให้ส่งคำสั่ง Push ไปที่ Expo
+                if (cg.device_token) {
+                    await fetch('https://exp.host/--/api/v2/push/send', {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            to: cg.device_token,
+                            sound: 'default',
+                            title: 'แจ้งเตือนจากผู้ป่วย ⚠️',
+                            body: message,
+                            priority: 'high'
+                        })
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        console.error("❌ Error sending notification to caregiver:", error);
+    }
+};
+
+// ==========================================
+// ⏱️ Auto Check & Update Tasks
+// ==========================================
+const autoMarkMissedMedications = async (userId) => {
+    try {
+        // ดึงรายการยาที่เลยกำหนด 60 นาที (ข้ามมื้อนี้) และยังไม่มี Log
+        const [missingMeds] = await db.query(`
+            SELECT s.schedule_id, um.custom_name, um.user_id
+            FROM Schedule s
+            JOIN User_Medication um ON s.user_med_id = um.user_med_id
+            LEFT JOIN Medication_Log ml 
+                ON s.schedule_id = ml.schedule_id 
+                AND DATE(ml.taken_at) = CURDATE()
+            WHERE um.user_id = ?
+            AND (um.is_deleted = 0 OR um.is_deleted IS NULL)
+            AND ml.med_log_id IS NULL  
+            AND CURTIME() >= ADDTIME(s.time_to_take, '01:00:00')
+        `, [userId]);
+
+        // ถ้าพบยาที่ขาด ให้ส่งแจ้งเตือนผู้ดูแล และอัปเดตตารางเป็น missed
+        if (missingMeds.length > 0) {
+            for (let med of missingMeds) {
+                // แจ้งเตือนผู้ดูแล
+                await notifyCaregiver(userId, `⚠️ ผู้ป่วยเลยเวลาทานยา: ${med.custom_name} เกิน 60 นาที (ปรับเป็นข้ามมื้อยา)`);
+
+                // บันทึกสถานะ missed
+                await db.query(`
+                    INSERT INTO Medication_Log (schedule_id, status, taken_at)
+                    VALUES (?, 'missed', NOW())
+                `, [med.schedule_id]);
+            }
+        }
+    } catch (error) {
+        console.error("Error auto-marking missed meds:", error);
+    }
+};
+
+const autoDeactivateExpiredMedications = async (userId) => {
+    try {
+        const sql = `
+            UPDATE User_Medication 
+            SET is_active = 0 
+            WHERE user_id = ? 
+            AND is_active = 1 
+            AND end_date < CURDATE()
+        `;
+        await db.query(sql, [userId]);
+    } catch (error) {
+        console.error("Error auto-deactivating expired meds:", error);
+    }
+};
+
+// ==========================================
 // 📸 API อัปโหลดรูปภาพ
 // ==========================================
 app.post('/api/upload', upload.single('profileImage'), (req, res) => {
@@ -88,9 +146,9 @@ app.post('/api/upload', upload.single('profileImage'), (req, res) => {
         return res.status(400).json({ message: 'กรุณาเลือกรูปภาพ' });
     }
     const protocol = req.protocol;
-    const host = req.get('host'); 
+    const host = req.get('host');
     const fullUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
-    
+
     res.json({ url: fullUrl });
 });
 
@@ -99,21 +157,35 @@ app.post('/api/upload', upload.single('profileImage'), (req, res) => {
 // ==========================================
 
 app.post('/api/register', async (req, res) => {
-    const { email, password, firstname, lastname } = req.body;
+    // ❇️ รับค่า gender, age, weight, height เพิ่มเติม
+    const { email, password, firstname, lastname, gender, age, weight, height } = req.body;
     if (!email || !password) {
         return res.status(400).json({ message: 'email และ password จำเป็นต้องระบุ' });
     }
     try {
-        const [existingUser] = await db.query('SELECT * FROM user WHERE email = ?', [email]); 
+        const [existingUser] = await db.query('SELECT * FROM user WHERE email = ?', [email]);
         if (existingUser.length > 0) return res.status(400).json({ message: 'อีเมลนี้ถูกใช้งานแล้ว' });
 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
         const invite_code = Math.random().toString(36).substring(2, 8).toUpperCase();
 
+        // ❇️ บันทึกข้อมูลสุขภาพลง Database ด้วย
         await db.query(
-            'INSERT INTO user (email, password, firstname, lastname, invite_code) VALUES (?, ?, ?, ?, ?)',
-            [email, hashedPassword, firstname, lastname, invite_code]
+            `INSERT INTO user 
+            (email, password, firstname, lastname, invite_code, gender, age, weight, height) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                email,
+                hashedPassword,
+                firstname,
+                lastname,
+                invite_code,
+                gender || null,
+                age || null,
+                weight || null,
+                height || null
+            ]
         );
         res.status(201).json({ message: 'สมัครสมาชิกเรียบร้อยแล้ว' });
     } catch (error) {
@@ -143,9 +215,10 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// ❇️ อัปเดตการรับค่า เพศ (gender), อายุ (age), น้ำหนัก (weight)
 app.put('/api/users/:id', async (req, res) => {
     const { id } = req.params;
-    const { firstname, lastname, password, profile_image } = req.body;
+    const { firstname, lastname, password, profile_image, gender, age, weight, height } = req.body;
 
     if (!firstname || !lastname) {
         return res.status(400).json({ message: 'firstname และ lastname จำเป็นต้องระบุ' });
@@ -155,17 +228,11 @@ app.put('/api/users/:id', async (req, res) => {
         let query = 'UPDATE user SET firstname = ?, lastname = ?';
         let params = [firstname, lastname];
 
-        if (profile_image) {
-            query += ', profile_image = ?';
-            params.push(profile_image);
-        }
-
-        if (password && password.trim() !== "") {
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
-            query += ', password = ?';
-            params.push(hashedPassword);
-        }
+        if (profile_image) { query += ', profile_image = ?'; params.push(profile_image); }
+        if (gender) { query += ', gender = ?'; params.push(gender); }
+        if (age) { query += ', age = ?'; params.push(age); }
+        if (weight) { query += ', weight = ?'; params.push(weight); }
+        if (height) { query += ', height = ?'; params.push(height); } // ❇️ เพิ่มคัดกรองส่วนสูงตรงนี้
 
         query += ' WHERE user_id = ?';
         params.push(id);
@@ -184,17 +251,17 @@ app.put('/api/users/:id', async (req, res) => {
 // 2. ส่วนยา (Medications)
 // ==========================================
 
-// ดึงรายการยาของ User
+// ดึงรายการยาของ User ❇️ เพิ่ม m.trade_name, m.mg
 app.get('/api/medications/:userId', async (req, res) => {
     const { userId } = req.params;
-    const { all } = req.query; 
+    const { all } = req.query;
 
     try {
         await autoMarkMissedMedications(userId);
         await autoDeactivateExpiredMedications(userId);
         let sql = `
             SELECT 
-                m.user_med_id, m.custom_name, m.instruction, m.dosage_unit, m.disease_group,
+                m.user_med_id, m.custom_name, m.trade_name, m.mg, m.instruction, m.dosage_unit, m.disease_group,
                 m.custom_image AS image_url, m.is_active, 
                 s.current_quantity,
                 sch.schedule_id, sch.time_to_take, sch.days_of_week, sch.dosage_amount,
@@ -205,8 +272,7 @@ app.get('/api/medications/:userId', async (req, res) => {
             LEFT JOIN Schedule sch ON m.user_med_id = sch.user_med_id
             LEFT JOIN Medication_Log ml ON sch.schedule_id = ml.schedule_id AND DATE(ml.taken_at) = CURDATE()
             WHERE m.user_id = ?
-            
-            AND (m.is_deleted = 0 OR m.is_deleted IS NULL)  -- ✅ เพิ่มบรรทัดนี้: กรองยาที่ถูกลบออก
+            AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
         `;
 
         if (all !== 'true') {
@@ -223,7 +289,6 @@ app.get('/api/medications/:userId', async (req, res) => {
     }
 });
 
-// ดึงรายชื่อกลุ่มโรค (Disease Groups)
 app.get('/api/disease-groups/:userId', async (req, res) => {
     const { userId } = req.params;
     try {
@@ -239,16 +304,15 @@ app.get('/api/disease-groups/:userId', async (req, res) => {
     }
 });
 
-// ค้นหายาจาก Master
 app.get('/api/master-medications', async (req, res) => {
-    const { query } = req.query; 
+    const { query } = req.query;
     try {
-        let sql = 'SELECT * FROM medication_master';
+        let sql = 'SELECT * FROM Medication_Master';
         let params = [];
 
         if (query) {
-            sql += ' WHERE generic_name LIKE ? OR description LIKE ?';
-            params.push(`%${query}%`, `%${query}%`);
+            sql += ' WHERE generic_name LIKE ? OR trade_name LIKE ? OR description LIKE ?';
+            params.push(`%${query}%`, `%${query}%`, `%${query}%`);
         }
 
         const [rows] = await db.query(sql, params);
@@ -259,17 +323,15 @@ app.get('/api/master-medications', async (req, res) => {
     }
 });
 
-// เพิ่มยาใหม่ (POST)
+// เพิ่มยาใหม่ ❇️ บันทึก trade_name และ mg
 app.post('/api/medications', async (req, res) => {
-    const { 
-        user_id, custom_name, instruction, dosage_unit, image_url, 
+    const {
+        user_id, custom_name, trade_name, mg, instruction, dosage_unit, image_url,
         initial_quantity, notify_threshold, days_of_week, dosage_amount,
         intake_timing, start_date, end_date, times,
-        disease_group, 
-        drug_type 
+        disease_group, drug_type
     } = req.body;
 
-    // basic validation
     if (!user_id || !custom_name) {
         return res.status(400).json({ message: 'user_id และ custom_name จำเป็นต้องระบุ' });
     }
@@ -280,13 +342,12 @@ app.post('/api/medications', async (req, res) => {
 
         const [medResult] = await connection.query(
             `INSERT INTO User_Medication 
-            (user_id, custom_name, disease_group, drug_type, instruction, dosage_unit, dosage_amount, custom_image, intake_timing, start_date, end_date) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
-            [user_id, custom_name, disease_group, drug_type, instruction, dosage_unit, dosage_amount, image_url, intake_timing, start_date, end_date]
+            (user_id, custom_name, trade_name, mg, disease_group, drug_type, instruction, dosage_unit, dosage_amount, custom_image, intake_timing, start_date, end_date) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [user_id, custom_name, trade_name, mg, disease_group, drug_type, instruction, dosage_unit, dosage_amount, image_url, intake_timing, start_date, end_date]
         );
         const medId = medResult.insertId;
 
-        // insert stock
         await connection.query(
             `INSERT INTO Stock (user_med_id, current_quantity, notify_threshold) VALUES (?, ?, ?)`,
             [medId, initial_quantity, notify_threshold]
@@ -315,15 +376,13 @@ app.post('/api/medications', async (req, res) => {
     }
 });
 
-// ==========================================
-// แก้ไขยา (PUT) - แบบฉลาด (ไม่ลบ Log ถ้าเวลาไม่เปลี่ยน)
-// ==========================================
+// แก้ไขยา ❇️ บันทึก trade_name และ mg
 app.put('/api/medications/:medId', async (req, res) => {
     const { medId } = req.params;
-    const { 
-        custom_name, instruction, dosage_unit, image_url, 
+    const {
+        custom_name, trade_name, mg, instruction, dosage_unit, image_url,
         initial_quantity, notify_threshold, intake_timing, start_date, end_date, times,
-        disease_group, drug_type 
+        disease_group, drug_type
     } = req.body;
 
     if (!custom_name) {
@@ -334,12 +393,11 @@ app.put('/api/medications/:medId', async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // 1. อัปเดตข้อมูลยาหลัก
         let updateQuery = `
             UPDATE User_Medication 
-            SET custom_name=?, disease_group=?, drug_type=?, instruction=?, dosage_unit=?, intake_timing=?, start_date=?, end_date=?
+            SET custom_name=?, trade_name=?, mg=?, disease_group=?, drug_type=?, instruction=?, dosage_unit=?, intake_timing=?, start_date=?, end_date=?
         `;
-        const params = [custom_name, disease_group, drug_type, instruction, dosage_unit, intake_timing, start_date, end_date];
+        const params = [custom_name, trade_name, mg, disease_group, drug_type, instruction, dosage_unit, intake_timing, start_date, end_date];
 
         if (image_url) {
             updateQuery += `, custom_image=?`;
@@ -350,32 +408,22 @@ app.put('/api/medications/:medId', async (req, res) => {
 
         await connection.query(updateQuery, params);
 
-        // 2. อัปเดตสต็อก (กรณีเติมยา)
         await connection.query(
             `UPDATE Stock SET current_quantity=?, notify_threshold=? WHERE user_med_id=?`,
             [initial_quantity, notify_threshold, medId]
         );
 
-        // 3. จัดการตารางเวลา (Schedule) - จุดสำคัญ!
         if (Array.isArray(times) && times.length > 0) {
-            
-            // 3.1 ดึงเวลาเดิมจาก DB มาเปรียบเทียบก่อน
             const [existingRows] = await connection.query(
-                'SELECT time_to_take FROM Schedule WHERE user_med_id = ? ORDER BY time_to_take ASC', 
+                'SELECT time_to_take FROM Schedule WHERE user_med_id = ? ORDER BY time_to_take ASC',
                 [medId]
             );
-            
-            // แปลงเวลาให้เป็น Format เดียวกันเพื่อเทียบ (เอาแค่ HH:MM)
+
             const currentTimes = existingRows.map(r => r.time_to_take.substring(0, 5));
             const newTimes = times.map(t => t.substring(0, 5)).sort();
-
-            // เช็คว่าเวลาเปลี่ยนหรือไม่?
             const isTimeChanged = JSON.stringify(currentTimes) !== JSON.stringify(newTimes);
 
             if (isTimeChanged) {
-                // ⚠️ กรณี: มีการเปลี่ยนเวลากินยา (จำเป็นต้องลบ Log เก่าเพื่อป้องกัน Error)
-                console.log('Time changed: Recreating schedule (Logs will be cleared)');
-                
                 await connection.query(`
                     DELETE ml FROM Medication_Log ml
                     JOIN Schedule s ON ml.schedule_id = s.schedule_id
@@ -390,10 +438,6 @@ app.put('/api/medications/:medId', async (req, res) => {
                         [medId, timeStr, 'Everyday', 1]
                     );
                 }
-            } else {
-                // ✅ กรณี: เวลาเหมือนเดิม (เช่น แค่เติมยา, แก้ชื่อ)
-                // ไม่ต้องทำอะไรกับ Schedule -> ประวัติการกินยา (Log) จะยังอยู่ครบ!
-                console.log('Time unchanged: Skipping schedule update to preserve logs');
             }
         }
 
@@ -408,21 +452,15 @@ app.put('/api/medications/:medId', async (req, res) => {
         connection.release();
     }
 });
-// ลบยา (Soft Delete - ซ่อนยาแต่เก็บประวัติไว้)
+
 app.delete('/api/medications/:medId', async (req, res) => {
     const { medId } = req.params;
     try {
-        // ✅ เปลี่ยนจาก DELETE เป็น UPDATE is_deleted = 1
         await db.query(
-            'UPDATE User_Medication SET is_deleted = 1 WHERE user_med_id = ?', 
+            'UPDATE User_Medication SET is_deleted = 1 WHERE user_med_id = ?',
             [medId]
         );
-        
-        // (ตัวเลือกเสริม) ถ้าอยากปิดการใช้งานยาด้วย เพื่อความชัวร์
-        // await db.query('UPDATE User_Medication SET is_active = 0 WHERE user_med_id = ?', [medId]);
-
         res.json({ message: 'ลบข้อมูลเรียบร้อย (เก็บประวัติไว้)' });
-
     } catch (error) {
         console.error("Delete Error:", error);
         res.status(500).json({ message: 'Error deleting medication', error: error.message });
@@ -430,77 +468,85 @@ app.delete('/api/medications/:medId', async (req, res) => {
 });
 
 // ==========================================
-// 3. ส่วนการกินยา (Log Dose) - ป้องกันการบันทึกซ้ำ
+// 3. ส่วนการกินยา (Log Dose)
 // ==========================================
 
+// ❇️ ปรับปรุงให้ยิงแจ้งเตือนผู้ดูแลแทนการส่งกลับไปเครื่องผู้ป่วย
 app.post('/api/log-dose', async (req, res) => {
     const { schedule_id, status } = req.body;
     console.log(`📥 [API /log-dose] ได้รับคำสั่งตัดสต็อก! schedule_id: ${schedule_id}, status: ${status}`);
     const connection = await db.getConnection();
+
     try {
         await connection.beginTransaction();
-        
-        // 🔒 1. เช็คก่อนว่าวันนี้บันทึกไปหรือยัง?
+
         const [existingLogs] = await connection.query(
             'SELECT * FROM Medication_Log WHERE schedule_id = ? AND DATE(taken_at) = CURDATE()',
             [schedule_id]
         );
 
-        // ถ้ามีประวัติแล้ว ให้หยุดทำงานและแจ้งกลับเลย (ไม่ตัดสต็อกซ้ำ)
         if (existingLogs.length > 0) {
             await connection.rollback();
             return res.status(200).json({ message: 'วันนี้คุณบันทึกยานี้ไปแล้ว' });
         }
 
-        // 2. ถ้ายังไม่มี ค่อยบันทึก
         await connection.query(
             `INSERT INTO Medication_Log (schedule_id, status, taken_at) VALUES (?, ?, NOW())`,
             [schedule_id, status]
         );
 
-        // ✅ ถ้าตรงเวลา หรือ ล่าช้า ให้ตัดสต็อกยาตามปกติ
         if (status === 'taken' || status === 'late') {
             const [scheduleRows] = await connection.query(
-                'SELECT dosage_amount, user_med_id FROM Schedule WHERE schedule_id = ?', 
+                `SELECT s.dosage_amount, s.user_med_id, um.user_id, um.custom_name 
+                 FROM Schedule s 
+                 JOIN User_Medication um ON s.user_med_id = um.user_med_id 
+                 WHERE s.schedule_id = ?`,
                 [schedule_id]
             );
 
             if (scheduleRows.length > 0) {
                 const dosage = scheduleRows[0].dosage_amount;
                 const medId = scheduleRows[0].user_med_id;
-                
-                // 3. ตัดสต็อก
+                const userId = scheduleRows[0].user_id;
+                const medName = scheduleRows[0].custom_name;
+
                 await connection.query(
                     'UPDATE Stock SET current_quantity = GREATEST(current_quantity - ?, 0) WHERE user_med_id = ?',
                     [dosage, medId]
                 );
 
-                // 4. เช็คแจ้งเตือนยาหมด
                 const [stockRows] = await connection.query(
                     'SELECT current_quantity, notify_threshold FROM Stock WHERE user_med_id = ?',
                     [medId]
                 );
 
-                let alertMessage = null;
                 if (stockRows.length > 0) {
                     const { current_quantity, notify_threshold } = stockRows[0];
+                    let alertMessage = null;
+
                     if (current_quantity <= notify_threshold && current_quantity > 0) {
-                        alertMessage = `⚠️ ยาใกล้หมด! เหลือเพียง ${current_quantity} หน่วย`;
+                        alertMessage = `⚠️ ยา ${medName} ใกล้หมด! เหลือเพียง ${current_quantity} หน่วย`;
                     } else if (current_quantity === 0) {
-                        alertMessage = `❌ ยาหมดแล้ว! กรุณาเติมยา`;
+                        alertMessage = `❌ ยา ${medName} หมดแล้ว! กรุณาเตรียมยาเพิ่มให้ผู้ป่วย`;
+                    }
+
+                    // ❇️ แทนที่จะส่ง alert กลับไปหา Frontend ของผู้ป่วย ให้ส่งหาผู้ดูแลแทน
+                    if (alertMessage) {
+                        await notifyCaregiver(userId, alertMessage);
                     }
                 }
 
                 await connection.commit();
-                res.json({ message: 'บันทึกเรียบร้อย', alert: alertMessage }); 
+                // ❇️ ตอบกลับผู้ป่วยโดยไม่มี alert 
+                res.json({ message: 'บันทึกเรียบร้อย' });
                 return;
             }
         } else if (status === 'missed') {
-            // ✅ กรณีเลยเวลา 1 ชม. (ข้ามมื้อยา) -> ไม่ต้องตัดสต็อก 
             await connection.commit();
             res.json({ message: 'บันทึกสถานะข้ามยาเรียบร้อย' });
             return;
         }
+
         await connection.commit();
         res.json({ message: 'บันทึกเรียบร้อย' });
     } catch (error) {
@@ -570,16 +616,15 @@ app.get('/api/symptoms/:userId', async (req, res) => {
 // ==========================================
 // 5. ส่วนผู้ดูแล (Caregiver)
 // ==========================================
-// ✅ เพิ่ม API สมัครสมาชิกผู้ดูแล
 app.post('/api/caregiver/register', async (req, res) => {
     const { email, password, firstname, lastname } = req.body;
-    
+
     if (!email || !password || !firstname || !lastname) {
         return res.status(400).json({ message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
     }
-    
+
     try {
-        const [existingCaregiver] = await db.query('SELECT * FROM Caregiver WHERE email = ?', [email]); 
+        const [existingCaregiver] = await db.query('SELECT * FROM Caregiver WHERE email = ?', [email]);
         if (existingCaregiver.length > 0) {
             return res.status(400).json({ message: 'อีเมลนี้ถูกใช้งานแล้วในระบบผู้ดูแล' });
         }
@@ -597,6 +642,7 @@ app.post('/api/caregiver/register', async (req, res) => {
         res.status(500).json({ message: 'เกิดข้อผิดพลาดในการสมัครสมาชิกผู้ดูแล' });
     }
 });
+
 app.post('/api/caregiver/login', async (req, res) => {
     const { email, password } = req.body;
     try {
@@ -634,14 +680,14 @@ app.post('/api/caregivers/invite', async (req, res) => {
     const { user_id, email } = req.body;
     try {
         const [caregivers] = await db.query('SELECT caregiver_id FROM Caregiver WHERE email = ?', [email]);
-        
+
         if (caregivers.length === 0) {
             return res.status(404).json({ message: 'ไม่พบผู้ดูแลที่มีอีเมลนี้ในระบบ' });
         }
 
         const caregiverId = caregivers[0].caregiver_id;
         const [existing] = await db.query(
-            'SELECT * FROM Caring WHERE user_id = ? AND caregiver_id = ?', 
+            'SELECT * FROM Caring WHERE user_id = ? AND caregiver_id = ?',
             [user_id, caregiverId]
         );
 
@@ -675,7 +721,7 @@ app.delete('/api/caregivers/:caringId', async (req, res) => {
 
 app.put('/api/caregivers/:id', async (req, res) => {
     const { id } = req.params;
-    const { firstname, lastname, password, profile_image } = req.body; 
+    const { firstname, lastname, password, profile_image } = req.body;
 
     try {
         let query = 'UPDATE Caregiver SET firstname = ?, lastname = ?';
@@ -761,15 +807,15 @@ app.post('/api/caregivers/link-qr', async (req, res) => {
     const { caregiver_id, invite_code } = req.body;
     try {
         const [users] = await db.query('SELECT user_id FROM user WHERE invite_code = ?', [invite_code]);
-        
+
         if (users.length === 0) {
             return res.status(404).json({ message: 'ไม่พบผู้ใช้งาน (QR Code ไม่ถูกต้อง)' });
         }
 
-        const targetUserId = users[0].user_id; 
+        const targetUserId = users[0].user_id;
 
         const [existing] = await db.query(
-            'SELECT * FROM Caring WHERE user_id = ? AND caregiver_id = ?', 
+            'SELECT * FROM Caring WHERE user_id = ? AND caregiver_id = ?',
             [targetUserId, caregiver_id]
         );
 
@@ -789,12 +835,22 @@ app.post('/api/caregivers/link-qr', async (req, res) => {
         res.status(500).json({ message: 'Error linking caregiver' });
     }
 });
+app.put('/api/caregiver/:id/token', async (req, res) => {
+    const { id } = req.params;
+    const { token } = req.body;
+    try {
+        await db.query('UPDATE Caregiver SET device_token = ? WHERE caregiver_id = ?', [token, id]);
+        res.json({ message: 'อัปเดต Token เรียบร้อย' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'เกิดข้อผิดพลาดในการบันทึก Token' });
+    }
+});
 
 // ==========================================
 // 6. ส่วน Admin (ฉบับสมบูรณ์)
 // ==========================================
 
-// 6.1 Admin Login
 app.post('/api/admin/login', async (req, res) => {
     const { username, password } = req.body;
     try {
@@ -811,7 +867,6 @@ app.post('/api/admin/login', async (req, res) => {
     }
 });
 
-// 6.2 การจัดการผู้ใช้งาน (User Management)
 app.get('/api/admin/users', async (req, res) => {
     try {
         const [rows] = await db.query('SELECT user_id AS id, firstname, lastname, email FROM user');
@@ -821,7 +876,6 @@ app.get('/api/admin/users', async (req, res) => {
     }
 });
 
-// ✅ แก้ไขข้อมูลผู้ใช้ (รวมรูปโปรไฟล์)
 app.put('/api/admin/users/:id', async (req, res) => {
     const { id } = req.params;
     const { firstname, lastname, email, profile_image } = req.body;
@@ -839,14 +893,8 @@ app.put('/api/admin/users/:id', async (req, res) => {
 app.delete('/api/admin/users/:id', async (req, res) => {
     const { id } = req.params;
     try {
-        // 1. ลบความสัมพันธ์ผู้ดูแล (ตาราง Caring)
         await db.query('DELETE FROM Caring WHERE user_id = ? OR caregiver_id = ?', [id, id]);
-        
-        // 2. ลบประวัติอาการป่วย (ตาราง Symptom_Log)
         await db.query('DELETE FROM Symptom_Log WHERE user_id = ?', [id]);
-        
-        // 3. ลบประวัติการทานยา (ตาราง Medication_Log) โดยอ้างอิงผ่าน Schedule และ User_Medication
-        // แก้ไข: เปลี่ยน Medication_Schedule เป็น Schedule และ user_medication เป็น User_Medication
         await db.query(`
             DELETE FROM Medication_Log 
             WHERE schedule_id IN (
@@ -855,38 +903,29 @@ app.delete('/api/admin/users/:id', async (req, res) => {
                     SELECT user_med_id FROM User_Medication WHERE user_id = ?
                 )
             )`, [id]);
-        
-        // 4. ลบตารางเวลาการทานยา (ตาราง Schedule)
         await db.query(`
             DELETE FROM Schedule 
             WHERE user_med_id IN (
                 SELECT user_med_id FROM User_Medication WHERE user_id = ?
             )`, [id]);
-            
-        // 5. ลบข้อมูลสต็อกยา (ตาราง Stock)
         await db.query(`
             DELETE FROM Stock 
             WHERE user_med_id IN (
                 SELECT user_med_id FROM User_Medication WHERE user_id = ?
             )`, [id]);
-        
-        // 6. ลบรายการยาของผู้ใช้ (ตาราง User_Medication)
         await db.query('DELETE FROM User_Medication WHERE user_id = ?', [id]);
-
-        // 7. สุดท้าย ลบตัวผู้ใช้งาน (ตาราง user)
         await db.query('DELETE FROM user WHERE user_id = ?', [id]);
 
         res.json({ message: 'ลบผู้ใช้งานและข้อมูลที่เกี่ยวข้องทั้งหมดเรียบร้อยแล้ว' });
     } catch (error) {
         console.error("Delete User Error:", error);
-        res.status(500).json({ 
-            message: 'เกิดข้อผิดพลาดในการลบผู้ใช้', 
-            error: error.message 
+        res.status(500).json({
+            message: 'เกิดข้อผิดพลาดในการลบผู้ใช้',
+            error: error.message
         });
     }
 });
 
-// 6.3 การจัดการคลังยาหลัก (Medication Master)
 app.get('/api/admin/medications', async (req, res) => {
     try {
         const [rows] = await db.query('SELECT * FROM Medication_Master');
@@ -896,12 +935,13 @@ app.get('/api/admin/medications', async (req, res) => {
     }
 });
 
+// ❇️ เพิ่มการรับค่า trade_name, mg 
 app.post('/api/admin/medications', async (req, res) => {
-    const { generic_name, description, dosage_unit, image_url, drug_type, default_disease_group } = req.body;
+    const { generic_name, trade_name, mg, description, dosage_unit, image_url, drug_type, default_disease_group } = req.body;
     try {
         await db.query(
-            'INSERT INTO Medication_Master (generic_name, description, dosage_unit, image_url, drug_type, default_disease_group) VALUES (?, ?, ?, ?, ?, ?)',
-            [generic_name, description, dosage_unit, image_url, drug_type, default_disease_group]
+            'INSERT INTO Medication_Master (generic_name, trade_name, mg, description, dosage_unit, image_url, drug_type, default_disease_group) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [generic_name, trade_name, mg, description, dosage_unit, image_url, drug_type, default_disease_group]
         );
         res.status(201).json({ message: 'เพิ่มยาเข้าคลังหลักเรียบร้อย' });
     } catch (error) {
@@ -910,14 +950,14 @@ app.post('/api/admin/medications', async (req, res) => {
     }
 });
 
-// ✅ แก้ไขยาในคลังหลัก (รวมรูปภาพ Master Med)
+// ❇️ เพิ่มการรับค่า trade_name, mg
 app.put('/api/admin/master-medications/:id', async (req, res) => {
     const { id } = req.params;
-    const { generic_name, description, dosage_unit, image_url, drug_type, default_disease_group } = req.body;
+    const { generic_name, trade_name, mg, description, dosage_unit, image_url, drug_type, default_disease_group } = req.body;
     try {
         await db.query(
-            "UPDATE Medication_Master SET generic_name = ?, description = ?, dosage_unit = ?, image_url = ?, drug_type = ?, default_disease_group = ? WHERE med_id = ?",
-            [generic_name, description, dosage_unit, image_url, drug_type, default_disease_group, id]
+            "UPDATE Medication_Master SET generic_name = ?, trade_name = ?, mg = ?, description = ?, dosage_unit = ?, image_url = ?, drug_type = ?, default_disease_group = ? WHERE med_id = ?",
+            [generic_name, trade_name, mg, description, dosage_unit, image_url, drug_type, default_disease_group, id]
         );
         res.json({ message: "อัปเดตข้อมูลยาหลักเรียบร้อยแล้ว" });
     } catch (err) {
@@ -935,6 +975,7 @@ app.delete('/api/admin/master-medications/:id', async (req, res) => {
         res.status(500).json({ message: "ลบไม่ได้" });
     }
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
